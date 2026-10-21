@@ -1,0 +1,1 @@
+"""PyGame user interface package."""

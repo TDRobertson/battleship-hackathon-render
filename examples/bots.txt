@@ -1,0 +1,5 @@
+# One bot spec per line. Built-ins and module:Class paths both work.
+starter
+hunt-target
+# alice_bot:MyAgent
+# bob_bot:MyAgent
