@@ -34,7 +34,7 @@ class DebugSettings:
     """Mutable state for the battle-screen helper visualizer."""
 
     enabled: bool = True
-    layer_index: int = 1
+    layer_index: int = 0
     focus_index: int = 0
     diagonal_spacing: int = 2
     diagonal_offset: int = 0

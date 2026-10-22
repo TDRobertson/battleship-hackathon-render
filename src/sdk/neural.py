@@ -326,14 +326,14 @@ def outcome_reward(result: PublicShotResult, won: bool, scheme: RewardScheme = R
 def to_torch_observation(channels: np.ndarray):
     try:
         import torch
-    except ModuleNotFoundError as exc:  # pragma: no cover - depends on optional rl extra.
-        raise RuntimeError("Torch tensors require PyTorch. Install the optional RL dependencies with: pip install -e .[rl]") from exc
+    except ModuleNotFoundError as exc:  # pragma: no cover - depends on optional ml extra.
+        raise RuntimeError("Torch tensors require PyTorch. Install the optional ML dependencies with: pip install -e .[ml]") from exc
     return torch.tensor(channels, dtype=torch.float32).unsqueeze(0)
 
 
 def to_torch_mask(mask: np.ndarray):
     try:
         import torch
-    except ModuleNotFoundError as exc:  # pragma: no cover - depends on optional rl extra.
-        raise RuntimeError("Torch tensors require PyTorch. Install the optional RL dependencies with: pip install -e .[rl]") from exc
+    except ModuleNotFoundError as exc:  # pragma: no cover - depends on optional ml extra.
+        raise RuntimeError("Torch tensors require PyTorch. Install the optional ML dependencies with: pip install -e .[ml]") from exc
     return torch.tensor(mask, dtype=torch.bool)

@@ -59,7 +59,7 @@ Default shooting channels:
 - `hit_neighbors`
 - `line_extensions`
 - `parity`
-- optional ship-alive channels
+- optional `ship_alive_lengths` channel when `include_ship_alive=True`
 
 Shooting actions are board cells. Use `coord_to_action` and `action_to_coord`
 to convert between `(row, col)` and flat action indices.
@@ -92,6 +92,9 @@ from sdk.neural import (
 shooting_encoder = with_ship_slot_alive_channels(default_observation_encoder(), rules)
 placement_encoder = with_ship_slot_placed_channels(default_placement_encoder(), rules)
 ```
+
+`with_ship_slot_alive_channels(...)` adds one shooting channel per ship slot,
+named `ship_0_alive` through `ship_4_alive` for the official fleet.
 
 ## Rewards
 
@@ -139,3 +142,16 @@ opponents usually avoids brittle habits better.
 
 This keeps placement creativity and shot-selection tactics independent enough
 to experiment quickly.
+
+## Reference Examples
+
+Runnable machine-learning reference loops live in `examples/`:
+
+- `examples/ml_supervised_occupancy.py`: supervised training against SDK
+  occupancy-map labels.
+- `examples/ml_reinforce_target.py`: a small policy-gradient loop for solo
+  target practice.
+
+These examples show how to connect SDK tensors, legal-action masks, losses,
+rewards, and metric logging. They are starting scaffolds rather than strategy
+recommendations.

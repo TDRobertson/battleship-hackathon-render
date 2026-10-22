@@ -1,10 +1,11 @@
 import numpy as np
+import pytest
 
 from core.models import Player
 from ui.controller import PlacementController
 from ui.geometry import BoardGeometry
 from ui.pygame_app import _button_action, _best_marker_enabled, _placement_buttons, _practice_buttons, _toggle_theme
-from ui.rendering import DARK_THEME, LIGHT_THEME, highest_value_cell
+from ui.rendering import DARK_THEME, LIGHT_THEME, highest_value_cell, wrap_text
 
 
 def test_pixel_to_grid_boundaries():
@@ -77,3 +78,15 @@ def test_best_marker_is_only_enabled_for_probability_layers():
     assert _best_marker_enabled("information")
     assert not _best_marker_enabled("neural")
     assert not _best_marker_enabled("diagonal")
+
+
+def test_wrap_text_splits_long_unspaced_words():
+    pygame = pytest.importorskip("pygame")
+    pygame.font.init()
+    max_width = 80
+
+    lines = wrap_text(pygame, "examples.complete_bot:DocumentedExampleBot", 22, max_width)
+    font = pygame.font.Font(None, 22)
+
+    assert len(lines) > 1
+    assert all(font.size(line)[0] <= max_width for line in lines)

@@ -19,10 +19,24 @@ timeouts lose immediately. See `docs/rules.md` for the complete rules summary.
 
 Requirements:
 
-- Python 3.11 or newer
+- Python 3.11, 3.12, or 3.13
 - `pip`
 
-Optional but recommended: create a virtual environment first.
+Python 3.14 and newer are not documented as supported for this kit yet because
+the optional UI depends on pygame, and pygame wheels may lag new Python
+releases. Use Python 3.11 for the smoothest event setup.
+
+Package requirements:
+
+| Install extra | Packages | Needed for |
+| --- | --- | --- |
+| Base | `numpy>=1.24` | Engine, SDK helpers, bots, simulations |
+| `dev` | `pytest>=7.4`, `hypothesis>=6.88` | Tests and helper-contract checks |
+| `ui` | `pygame>=2.5` | `battleship play` and target-practice UI |
+| `ml` | `torch>=2.0`, `matplotlib>=3.7` | Machine-learning helpers, tensors, and plots |
+
+Optional but recommended: create a virtual environment first. Use either
+`venv` or `conda`.
 
 Windows PowerShell:
 
@@ -38,6 +52,15 @@ macOS/Linux:
 ```sh
 python3.11 -m venv .venv
 . .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -e ".[dev,ui]"
+```
+
+Conda:
+
+```console
+conda create -n battleship python=3.11
+conda activate battleship
 python -m pip install --upgrade pip
 pip install -e ".[dev,ui]"
 ```
@@ -117,8 +140,8 @@ Use these when you need them:
 7. `docs/remote_play.md`: LAN server/client setup for remote bots.
 8. `docs/development.md`: testing and maintainer notes.
 
-Small copyable snippets live in `examples/`. Organizer scripts live in
-`scripts/`.
+Teaching snippets and complete example bots live in `examples/`. Organizer
+scripts live in `scripts/`.
 
 ## Bot Interface
 
@@ -157,6 +180,8 @@ battleship simulate --bot-a my_bot:MyAgent --bot-b hunt-target --games 50
 ```text
 src/
 |-- agent.py              # Participant-facing bot base class
+|-- app/                  # Command-line interface implementation
+|-- battleship/           # `python -m battleship` entry package
 |-- bots/                 # Two small reference bots, not a strategy library
 |-- core/                 # Authoritative rules and engine
 |-- runtime/              # Match runner and subprocess worker
@@ -164,10 +189,16 @@ src/
 `-- ui/                   # PyGame human-vs-bot app
 
 examples/
+|-- EXAMPLES.md           # Example snippet overview
 |-- bots.txt              # Sample tournament bot list
 |-- candidate_scoring.py  # Candidate/scoring snippet
+|-- complete_bot.py       # Complete documented Agent example
 |-- custom_placement.py   # Placement portfolio snippet
-`-- neural_channels.py    # Neural observation snippet
+|-- heatmap_inference.py  # Fleet-sampling shot-scoring snippet
+|-- ml_reinforce_target.py      # Tiny policy-gradient training reference
+|-- ml_supervised_occupancy.py  # Supervised occupancy-map training reference
+|-- neural_channels.py    # Neural observation snippet
+`-- opponent_memory_bot.py # Persistent-memory Agent example
 
 scripts/
 |-- organizer_local_tournament.py
@@ -175,6 +206,10 @@ scripts/
 `-- organizer_remote_server.py
 
 docs/
+|-- agent_protocol.md     # Process and remote transport protocol notes
+|-- development.md        # Testing and maintainer notes
+|-- helper_contracts.md   # Behavioral contracts for SDK helpers
+|-- opponent_memory.md    # Persistent per-opponent memory guidance
 |-- rules.md              # Official rules summary
 |-- tutorial_build_bot.md # First-bot walkthrough
 |-- sdk_helpers.md        # Helper reference
@@ -190,8 +225,8 @@ docs/
 pytest
 ```
 
-For neural-network bots and training plots, install the optional RL dependencies:
+For neural-network bots and training plots, install the optional ML dependencies:
 
 ```console
-pip install -e ".[dev,ui,rl]"
+pip install -e ".[dev,ui,ml]"
 ```

@@ -209,5 +209,5 @@ def _pyplot():
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except ModuleNotFoundError as exc:  # pragma: no cover - depends on optional plotting dependency.
-        raise RuntimeError("Plots require matplotlib. Install the optional RL dependencies with: pip install -e .[rl]") from exc
+        raise RuntimeError("Plots require matplotlib. Install the optional ML dependencies with: pip install -e .[ml]") from exc
     return plt

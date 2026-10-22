@@ -6,6 +6,12 @@ from sdk.observation import ObservationState
 from ui.debug_tools import DebugLayerCache, DebugSettings, build_debug_layer, neural_channel_names, selected_cell_details
 
 
+def test_debug_settings_default_to_no_helper_overlay():
+    settings = DebugSettings()
+
+    assert settings.layer == "none"
+
+
 def test_diagonal_debug_layer_uses_spacing_and_offset():
     rules = official_rules()
     state = ObservationState(rules)

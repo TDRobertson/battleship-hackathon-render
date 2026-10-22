@@ -169,6 +169,10 @@ that would come from using only the first capped fleets in row-major
 enumeration. A bot can use this as one signal, ignore it, combine it with
 another signal, or deliberately shoot low-probability cells.
 
+Occupancy values are probability-like numbers from `0.0` to `1.0`. A value of
+`0.30` means about 30 percent of the sampled legal fleets contain an alive ship
+at that cell.
+
 `sdk.inference.sample_possible_fleets(rules, observation, max_samples=500, rng=None, time_limit=1.0)`
 
 Returns up to `max_samples` complete alive-ship fleets that are consistent with
@@ -220,6 +224,21 @@ only. With the default `None`, it returns the hit/miss probability-weighted
 expected entropy reduction. This is useful for bots that want to seek
 information without hard-coding a particular targeting strategy.
 
+Information scores are not hit probabilities and are not limited to `0.0` to
+`1.0`. They are expected uncertainty-reduction scores: larger values mean the
+shot result would, on average, rule out or separate more of the remaining fleet
+hypotheses. The units are entropy-like and are most useful when compared with
+other candidate cells from the same observation.
+
+Occupancy and information answer different questions:
+
+- Occupancy asks: "How often is a ship in this cell?"
+- Information asks: "How much would the answer at this cell clarify the rest of
+  the board?"
+
+Because those questions differ, the highest-occupancy cell and the
+highest-information cell do not have to be the same cell.
+
 `sdk.inference.fleet_pool_entropy(rules, fleets)` and `sdk.inference.occupancy_entropy(occupancy)`
 
 Return the total marginal occupancy entropy behind the information score. These
@@ -238,6 +257,36 @@ the scores mean.
 
 Small wrapper around `sdk.inference.hypothesis_reduction_scores` for bots or
 experiments that want expected split-information scores.
+
+## Opponent Memory
+
+During `simulate` and `tournament`, the runner gives each bot a mutable
+per-opponent memory dictionary through optional lifecycle hooks. Memory is
+enabled by default and stored under `results/memory`; use `--no-memory` to
+disable it or `--memory-dir path` to choose a separate store.
+
+```python
+def start_match(self, context):
+    self.memory = context.memory
+    self.stats = self.memory.get("_stats", {})
+
+
+def observe_opponent_shot(self, result, time_remaining):
+    self.memory["last_opponent_shot"] = result.shot
+```
+
+The runner loads and saves the dictionary automatically. It also maintains
+`memory["_stats"]` with fields such as `games`, `wins`, `losses`,
+`opponent_recent_shots`, `opponent_opening_shots`, `opponent_center_rate`,
+`opponent_edge_rate`, `opponent_corner_rate`, and
+`opponent_parity_rate_first_20`.
+
+If a bot sets `memory["current_layout"]` before or during placement, the runner
+tracks that layout under `memory["_stats"]["layouts"]` with games, wins, losses,
+and average opponent shots.
+
+For cold-start pitfalls and safer adaptation patterns, see
+`docs/opponent_memory.md`.
 
 ## Validation
 
@@ -337,7 +386,7 @@ from sdk.training import MetricHistory
 
 history = MetricHistory()
 history.log_many({"loss": 0.42, "accuracy": 0.81}, step=10, phase="train", run="supervised")
-history.log("episode_reward", 3.0, step=2, phase="train", run="rl", episode=2)
+history.log("episode_reward", 3.0, step=2, phase="train", run="ml", episode=2)
 history.save_csv("metrics.csv")
 ```
 
@@ -352,7 +401,7 @@ Loads a CSV written by `MetricHistory.save_csv`.
 `sdk.training.save_metric_plot(history, path, metrics=None, phases=None, run=None, window=10)`
 
 Writes one or more metric curves. This works for supervised metrics such as
-`loss`, `accuracy`, and `validation_loss`, and RL metrics such as
+`loss`, `accuracy`, and `validation_loss`, and reinforcement-learning metrics such as
 `episode_reward`, `episode_length`, `entropy`, and `win_rate`.
 
 `sdk.training.save_comparison_plot(histories, path, metric, phase="train", window=10)`
@@ -368,7 +417,7 @@ per-bot rolling `win_rate`.
 `sdk.training.save_match_summary_plot(csv_path, path, window=10)`
 
 Writes a quick rolling win-rate summary from a match/tournament CSV. Plotting
-requires the optional `rl` dependencies because that extra installs matplotlib.
+requires the optional `ml` dependencies because that extra installs matplotlib.
 
 `sdk.training.moving_average(values, window)`
 

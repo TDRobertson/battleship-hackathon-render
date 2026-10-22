@@ -4,12 +4,12 @@ import json
 import subprocess
 import sys
 import threading
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import TextIO
 from uuid import uuid4
 
-from agent import Agent
-from core.models import Coord, ShipPlacement
+from agent import Agent, MatchContext, MatchEnd
+from core.models import Coord, PublicShotResult, ShipPlacement
 from sdk.observation import ObservationSnapshot, ObservationState
 from core.rules import Rules
 
@@ -37,8 +37,25 @@ class ProcessAgent(Agent):
             bufsize=1,
         )
         self._stderr: list[str] = []
+        self._context: MatchContext | None = None
         self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
         self._stderr_thread.start()
+
+    def start_match(self, context: MatchContext) -> None:
+        self._context = context
+        self._request(
+            {
+                "type": "start_match",
+                "action_id": str(uuid4()),
+                "context": {
+                    "match_id": context.match_id,
+                    "player": context.player.value,
+                    "bot_name": context.bot_name,
+                    "opponent_name": context.opponent_name,
+                    "memory": context.memory,
+                },
+            }
+        )
 
     def place_ships(self, rules: Rules, time_remaining: float) -> list[ShipPlacement]:
         response = self._request(
@@ -67,6 +84,31 @@ class ProcessAgent(Agent):
         row, col = response["shot"]
         return int(row), int(col)
 
+    def observe_opponent_shot(self, result: PublicShotResult, time_remaining: float) -> None:
+        self._request(
+            {
+                "type": "observe_opponent_shot",
+                "action_id": str(uuid4()),
+                "time_remaining": time_remaining,
+                "result": asdict(result),
+            }
+        )
+
+    def end_match(self, result: MatchEnd) -> None:
+        self._request(
+            {
+                "type": "end_match",
+                "action_id": str(uuid4()),
+                "result": {
+                    "won": result.won,
+                    "winner": result.winner.value,
+                    "reason": result.reason,
+                    "turns": result.turns,
+                },
+                "memory": self._context.memory if self._context is not None else {},
+            }
+        )
+
     def close(self) -> None:
         if self.process.poll() is None:
             self.process.terminate()
@@ -81,7 +123,7 @@ class ProcessAgent(Agent):
             raise WorkerFailure(f"worker exited with code {self.process.returncode}")
         assert self.process.stdin is not None
         assert self.process.stdout is not None
-        self.process.stdin.write(json.dumps(message) + "\n")
+        self.process.stdin.write(json.dumps(message, default=str) + "\n")
         self.process.stdin.flush()
         line = self.process.stdout.readline()
         if not line:
@@ -89,7 +131,16 @@ class ProcessAgent(Agent):
         response = json.loads(line)
         if not response.get("ok"):
             raise WorkerFailure(response.get("error", "worker error"))
+        self._sync_memory(response)
         return response
+
+    def _sync_memory(self, response: dict) -> None:
+        if self._context is None or "memory" not in response:
+            return
+        memory = response["memory"]
+        if isinstance(memory, dict):
+            self._context.memory.clear()
+            self._context.memory.update(memory)
 
     def _drain_stderr(self) -> None:
         stderr: TextIO | None = self.process.stderr

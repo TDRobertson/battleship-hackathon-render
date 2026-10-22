@@ -218,7 +218,9 @@ def draw_text_lines(
 
 def wrap_text(pygame, text: str, size: int, max_width: int) -> list[str]:
     font = pygame.font.Font(None, size)
-    words = str(text).split()
+    words: list[str] = []
+    for raw_word in str(text).split():
+        words.extend(_split_long_word(font, raw_word, max_width))
     if not words:
         return [""]
     lines: list[str] = []
@@ -232,6 +234,23 @@ def wrap_text(pygame, text: str, size: int, max_width: int) -> list[str]:
             current = word
     lines.append(current)
     return lines
+
+
+def _split_long_word(font, word: str, max_width: int) -> list[str]:
+    if font.size(word)[0] <= max_width:
+        return [word]
+    chunks: list[str] = []
+    current = ""
+    for char in word:
+        candidate = current + char
+        if current and font.size(candidate)[0] > max_width:
+            chunks.append(current)
+            current = char
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def highest_value_cell(values, eligible_mask=None) -> tuple[int, int] | None:

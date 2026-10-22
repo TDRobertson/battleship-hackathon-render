@@ -189,7 +189,7 @@ def run_app(
             if screen_name == "placement":
                 draw_text(pygame, screen, "Place Fleet", (60, 40), 44, theme.text)
                 draw_text(pygame, screen, "Untimed", (780, 46), 30, theme.text)
-                draw_text(pygame, screen, f"Bot: {bot_name}", (560, 46), 30, theme.text)
+                _draw_wrapped_lines(pygame, screen, (f"Bot: {bot_name}",), (560, 46), 205, 22, theme.text, max_lines=2)
                 draw_text(pygame, screen, "Hotkeys: R rotate, U undo, T theme, Q quit", (560, 92), 22, theme.subtle_text)
                 draw_board(pygame, screen, place_geom, theme=theme)
                 for p in placement.placements:
@@ -238,7 +238,16 @@ def run_app(
                 draw_text(pygame, screen, "Own Board", (40, 80), 32, theme.text)
                 draw_text(pygame, screen, "Enemy Board", (460, 80), 32, theme.text)
                 draw_text(pygame, screen, f"Winner: {winner}", (40, 40), 36, theme.hit)
-                draw_text(pygame, screen, engine.termination_reason or "ended", (220, 48), 24, theme.text)
+                _draw_wrapped_lines(
+                    pygame,
+                    screen,
+                    (engine.termination_reason or "ended",),
+                    (220, 45),
+                    880,
+                    22,
+                    theme.text,
+                    max_lines=2,
+                )
                 draw_own_board(pygame, screen, own_geom, engine.fleet_cells(Player.A), bot_shots, theme)
                 draw_revealed_target_board(pygame, screen, target_geom, engine.fleet_cells(Player.B), human_obs.snapshot(), theme)
                 draw_text(pygame, screen, "Enter restarts. T theme. Q quits.", (40, 540), 26, theme.text)
@@ -442,7 +451,7 @@ def _draw_debug_panel(pygame, screen, rect, debug: DebugSettings, rules, observa
     control_lines = _debug_control_lines(debug, neural_name, layer.details)
     _draw_wrapped_lines(pygame, screen, control_lines, (x + 14, y2), w - 28, 17, theme.text, max_lines=7)
     details = selected_cell_details(rules, observation, layer, debug.selected_cell)
-    _draw_wrapped_lines(pygame, screen, details, (x + 14, y + 552), w - 28, 17, theme.text, max_lines=4)
+    _draw_wrapped_lines(pygame, screen, details, (x + 14, y + h - 168), w - 28, 17, theme.text, max_lines=4)
     draw_text_lines(
         pygame,
         screen,

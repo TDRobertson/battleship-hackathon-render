@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "battleship-ai"
 version = "0.1.0"
 description = "Local Battleship platform for AI competitions"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "numpy>=1.24",
 ]
@@ -19,7 +19,7 @@ dev = [
 ui = [
     "pygame>=2.5",
 ]
-rl = [
+ml = [
     "torch>=2.0",
     "matplotlib>=3.7",
 ]
@@ -34,7 +34,7 @@ py-modules = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["app*", "bots*", "core*", "runtime*", "sdk*", "ui*"]
+include = ["app*", "battleship*", "bots*", "core*", "runtime*", "sdk*", "ui*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

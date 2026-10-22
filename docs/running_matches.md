@@ -84,6 +84,11 @@ battleship simulate --games 100 --seed 2026 --bot-a my_bot:MyAgent --bot-b hunt-
 battleship simulate --games 100 --seed 2026 --bot-a hunt-target --bot-b my_bot:MyAgent
 ```
 
+`simulate` uses persistent per-opponent memory by default, stored under
+`results/memory`. Add `--no-memory` when you want each match to be independent,
+or `--memory-dir path/to/memory` when you want a separate memory store for a
+specific experiment.
+
 ## Benchmark Shots To Sink
 
 To measure how many shots a bot needs to sink randomly placed fleets without an
@@ -120,6 +125,21 @@ A simple round-robin can be run with the `tournament` command:
 ```console
 battleship tournament --process --games 50 --seed 1 --csv tournament.csv --bot alice_bot:MyAgent --bot bob_bot:MyAgent --bot starter
 ```
+
+Bots remember repeated opponents by default, using `results/memory`. Use
+`--memory-dir` to choose a different memory store:
+
+```console
+battleship tournament --process --games 50 --memory-dir results/memory --bot alice_bot:MyAgent --bot bob_bot:MyAgent --bot starter
+```
+
+The runner loads a mutable per-opponent memory dictionary before each match,
+saves it afterward, and automatically maintains `memory["_stats"]` with common
+opponent tendencies such as games, wins, recent opponent shots, opening shots,
+center/edge/corner rates, and early parity rate. Add `--no-memory` to disable
+memory, or use `--reset-memory` when you want a fresh run. See
+`docs/opponent_memory.md` for bot-author guidance, including what to do when a
+bot sees a new opponent with empty memory.
 
 For a longer bot list, make a text file with one bot spec per line:
 

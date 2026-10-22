@@ -52,6 +52,35 @@ Inside `choose_shot`, `observation` has:
 - `ships_alive`: one flag per ship slot.
 - `available_shots()`: a 10 by 10 Boolean mask of legal targets.
 
+Bots can also define optional lifecycle hooks for opponent memory:
+
+```python
+def start_match(self, context):
+    self.memory = context.memory
+    stats = self.memory.get("_stats", {})
+    self.opponent_likes_center = stats.get("opponent_center_rate", 0.0) > 0.25
+
+
+def observe_opponent_shot(self, result, time_remaining):
+    self.memory["last_opponent_shot"] = result.shot
+
+
+def end_match(self, result):
+    self.memory["last_match_won"] = result.won
+```
+
+`simulate` and `tournament` persist memory between matches by default under
+`results/memory`. Use `--no-memory` to disable it, or `--memory-dir path` to
+choose a separate memory store. The runner automatically records common stats
+under `memory["_stats"]`, including games, wins, recent opponent shots, opening
+shots, center/edge/corner rates, and early parity rate. If placement code sets
+`memory["current_layout"]`, the runner also tracks per-layout results against
+that opponent.
+
+On the first match against a new opponent, memory may be empty. Use `.get(...)`
+defaults and wait for a few games before trusting rates. See
+`docs/opponent_memory.md` for safer adaptation patterns.
+
 ## 3. Start With Legal Placement
 
 The starter uses:
@@ -133,7 +162,7 @@ Ideas you can implement quickly:
 - Randomly choose among the top few scores instead of always taking the maximum.
 
 For neural-network and plotting helpers, see `docs/sdk_helpers.md`.
-For small copyable snippets, see `examples/`.
+For copyable snippets and complete example bots, see `examples/`.
 
 ## 7. Compare Changes
 

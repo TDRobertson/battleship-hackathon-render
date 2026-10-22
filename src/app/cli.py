@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import random
+import shutil
 from statistics import mean
 from pathlib import Path
 
@@ -17,15 +18,16 @@ from ui.practice import new_practice_target, practice_fire
 
 
 def simulate(args: argparse.Namespace) -> int:
+    memory_dir = _prepare_memory_dir(args)
     rng = random.Random(args.seed)
     wins = {"A": 0, "B": 0}
     rows = []
     for index in range(args.games):
         seed_a = rng.randrange(2**32)
         seed_b = rng.randrange(2**32)
-        report = _run_match(args.bot_a, args.bot_b, seed_a, seed_b, f"sim-{index}", args.process)
+        report = _run_match(args.bot_a, args.bot_b, seed_a, seed_b, f"sim-{index}", args.process, memory_dir)
         wins[report.winner.value] += 1
-        rows.append(_report_row(report, args.bot_a, args.bot_b, index))
+        rows.append(_report_row(report, args.bot_a, args.bot_b, index, memory_dir=memory_dir))
         if args.verbose:
             print(f"{report.match_id}: winner={report.winner.value} reason={report.reason} turns={report.turns}")
     print(f"games={args.games} A={wins['A']} B={wins['B']} seed={args.seed}")
@@ -35,6 +37,7 @@ def simulate(args: argparse.Namespace) -> int:
 
 
 def tournament(args: argparse.Namespace) -> int:
+    memory_dir = _prepare_memory_dir(args)
     bots = _tournament_bots(args)
     if len(bots) < 2:
         raise SystemExit("tournament requires at least two bots")
@@ -51,12 +54,12 @@ def tournament(args: argparse.Namespace) -> int:
             for game in range(args.games):
                 seed_a = rng.randrange(2**32)
                 seed_b = rng.randrange(2**32)
-                report = _run_match(bot_a, bot_b, seed_a, seed_b, f"tournament-{match_index}", args.process)
+                report = _run_match(bot_a, bot_b, seed_a, seed_b, f"tournament-{match_index}", args.process, memory_dir)
                 winner_spec = bot_a if report.winner is Player.A else bot_b
                 wins[winner_spec] += 1
                 games_played[bot_a] += 1
                 games_played[bot_b] += 1
-                rows.append(_report_row(report, bot_a, bot_b, game, pairing_id=match_index))
+                rows.append(_report_row(report, bot_a, bot_b, game, pairing_id=match_index, memory_dir=memory_dir))
                 match_index += 1
 
     for bot in sorted(bots, key=lambda spec: (-wins[spec], spec)):
@@ -148,13 +151,33 @@ def remote_match(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_match(bot_a_spec: str, bot_b_spec: str, seed_a: int, seed_b: int, match_id: str, process: bool) -> MatchReport:
+def _run_match(
+    bot_a_spec: str,
+    bot_b_spec: str,
+    seed_a: int,
+    seed_b: int,
+    match_id: str,
+    process: bool,
+    memory_dir: Path | None = None,
+) -> MatchReport:
     if process:
         with ProcessAgent(seed_a, bot_a_spec) as bot_a, ProcessAgent(seed_b, bot_b_spec) as bot_b:
-            return LocalRunner(official_rules()).run(bot_a, bot_b, match_id=match_id)
+            return LocalRunner(official_rules(), memory_dir=memory_dir).run(
+                bot_a,
+                bot_b,
+                match_id=match_id,
+                bot_a_name=bot_a_spec,
+                bot_b_name=bot_b_spec,
+            )
     bot_a = build_bot(bot_a_spec, seed_a)
     bot_b = build_bot(bot_b_spec, seed_b)
-    return LocalRunner(official_rules()).run(bot_a, bot_b, match_id=match_id)
+    return LocalRunner(official_rules(), memory_dir=memory_dir).run(
+        bot_a,
+        bot_b,
+        match_id=match_id,
+        bot_a_name=bot_a_spec,
+        bot_b_name=bot_b_spec,
+    )
 
 
 def _run_target_benchmark_game(bot_spec: str, bot_seed: int, target_seed: int) -> int:
@@ -184,8 +207,15 @@ def _benchmark_bot_seed(seed: int, bot_index: int, game: int) -> int:
     return rng.randrange(2**32)
 
 
-def _report_row(report: MatchReport, bot_a: str, bot_b: str, game: int, pairing_id: int | None = None) -> dict:
-    return {
+def _report_row(
+    report: MatchReport,
+    bot_a: str,
+    bot_b: str,
+    game: int,
+    pairing_id: int | None = None,
+    memory_dir: Path | None = None,
+) -> dict:
+    row = {
         "match_id": report.match_id,
         "pairing_id": "" if pairing_id is None else pairing_id,
         "game": game,
@@ -198,6 +228,24 @@ def _report_row(report: MatchReport, bot_a: str, bot_b: str, game: int, pairing_
         "a_remaining": round(report.remaining[Player.A], 6),
         "b_remaining": round(report.remaining[Player.B], 6),
     }
+    if memory_dir is not None:
+        row["memory_dir"] = str(memory_dir)
+    return row
+
+
+def _prepare_memory_dir(args: argparse.Namespace) -> Path | None:
+    if not getattr(args, "memory", True):
+        return None
+    memory_dir = getattr(args, "memory_dir", None)
+    path = Path(memory_dir or "results/memory")
+    if getattr(args, "reset_memory", False) and path.exists():
+        resolved = path.resolve()
+        if not path.is_dir():
+            raise SystemExit(f"--reset-memory requires a directory: {path}")
+        if resolved == Path(resolved.anchor):
+            raise SystemExit(f"refusing to reset filesystem root: {path}")
+        shutil.rmtree(path)
+    return path
 
 
 def _write_csv(path: Path, rows: list[dict]) -> None:
@@ -229,6 +277,9 @@ def build_parser() -> argparse.ArgumentParser:
     sim.add_argument("--verbose", action="store_true")
     sim.add_argument("--process", action="store_true", help="run bots through worker subprocesses")
     sim.add_argument("--csv", default=None, help="write per-game match results to CSV")
+    sim.add_argument("--memory", action=argparse.BooleanOptionalAction, default=True, help="load and save per-bot opponent memory")
+    sim.add_argument("--memory-dir", default=None, help="memory directory; default: results/memory")
+    sim.add_argument("--reset-memory", action="store_true", help="clear --memory-dir before running")
     sim.add_argument("--bot-a", default="starter", help=f"built-in bot or module:Class path. Built-ins: {available_bot_specs()}")
     sim.add_argument("--bot-b", default="starter", help=f"built-in bot or module:Class path. Built-ins: {available_bot_specs()}")
     sim.set_defaults(func=simulate)
@@ -239,6 +290,9 @@ def build_parser() -> argparse.ArgumentParser:
     tour.add_argument("--seed", type=int, default=123)
     tour.add_argument("--process", action="store_true", help="run bots through worker subprocesses")
     tour.add_argument("--csv", default=None, help="write per-game match results to CSV")
+    tour.add_argument("--memory", action=argparse.BooleanOptionalAction, default=True, help="load and save per-bot opponent memory")
+    tour.add_argument("--memory-dir", default=None, help="memory directory; default: results/memory")
+    tour.add_argument("--reset-memory", action="store_true", help="clear --memory-dir before running")
     tour.add_argument("--include-mirrors", action="store_true", help="also run bots against themselves")
     tour.set_defaults(func=tournament)
     bench = sub.add_parser("benchmark")

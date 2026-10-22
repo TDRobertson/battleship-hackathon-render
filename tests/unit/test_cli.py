@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 from uuid import uuid4
 
@@ -7,7 +8,7 @@ from app.cli import main
 def test_simulate_writes_csv():
     path = _output_path("sim")
     try:
-        assert main(["simulate", "--games", "1", "--bot-a", "starter-random", "--bot-b", "starter-random", "--csv", str(path)]) == 0
+        assert main(["simulate", "--games", "1", "--bot-a", "starter-random", "--bot-b", "starter-random", "--csv", str(path), "--no-memory"]) == 0
 
         text = path.read_text()
         assert "match_id,pairing_id,game,bot_a,bot_b,winner,winner_bot,reason,turns,a_remaining,b_remaining" in text
@@ -30,6 +31,7 @@ def test_tournament_writes_csv():
                 "1",
                 "--csv",
                 str(path),
+                "--no-memory",
             ]
         ) == 0
 
@@ -52,6 +54,35 @@ def test_benchmark_writes_average_shot_counts(capsys):
         assert "starter-random" in text
     finally:
         _cleanup(path)
+
+
+def test_simulate_uses_memory_by_default():
+    memory_dir = Path(".test-output") / f"default-memory-{uuid4().hex}"
+    try:
+        assert (
+            main(
+                [
+                    "simulate",
+                    "--games",
+                    "1",
+                    "--bot-a",
+                    "starter-random",
+                    "--bot-b",
+                    "hunt-target",
+                    "--memory-dir",
+                    str(memory_dir),
+                ]
+            )
+            == 0
+        )
+        assert (memory_dir / "starter-random" / "hunt-target.json").exists()
+        assert (memory_dir / "hunt-target" / "starter-random.json").exists()
+    finally:
+        shutil.rmtree(memory_dir, ignore_errors=True)
+        try:
+            memory_dir.parent.rmdir()
+        except OSError:
+            pass
 
 
 def test_play_supports_solo_flag(monkeypatch):

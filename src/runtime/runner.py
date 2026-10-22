@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from uuid import uuid4
 
-from agent import Agent
+from agent import Agent, MatchContext, MatchEnd
 from runtime.clocks import MatchClocks, Monotonic
 from core.engine import GameEngine, InvalidAction
 from core.models import Player
+from sdk.memory import MemorySession, OpponentStatsTracker, load_memory_session
 from sdk.observation import ObservationState, result_to_public
 from core.rules import Rules, official_rules
 
@@ -24,15 +26,48 @@ class MatchReport:
 class LocalRunner:
     rules: Rules = field(default_factory=official_rules)
     monotonic: Monotonic | None = None
+    memory_dir: str | Path | None = None
 
-    def run(self, agent_a: Agent, agent_b: Agent, match_id: str | None = None) -> MatchReport:
+    def run(
+        self,
+        agent_a: Agent,
+        agent_b: Agent,
+        match_id: str | None = None,
+        bot_a_name: str = "A",
+        bot_b_name: str = "B",
+    ) -> MatchReport:
         engine = GameEngine(self.rules)
         clocks = MatchClocks(self.rules.thinking_seconds, self.monotonic) if self.monotonic else MatchClocks(self.rules.thinking_seconds)
         agents = {Player.A: agent_a, Player.B: agent_b}
+        bot_names = {Player.A: bot_a_name, Player.B: bot_b_name}
         observations = {Player.A: ObservationState(self.rules), Player.B: ObservationState(self.rules)}
         match_id = match_id or str(uuid4())
+        memory_sessions = {
+            Player.A: load_memory_session(self.memory_dir, bot_a_name, bot_b_name),
+            Player.B: load_memory_session(self.memory_dir, bot_b_name, bot_a_name),
+        }
+        trackers = {
+            player: OpponentStatsTracker(self.rules, player, memory_sessions[player].memory, [])
+            for player in (Player.A, Player.B)
+        }
 
         for player in (Player.A, Player.B):
+            try:
+                context = MatchContext(
+                    match_id=match_id,
+                    player=player,
+                    bot_name=bot_names[player],
+                    opponent_name=bot_names[player.opponent],
+                    memory=memory_sessions[player].memory,
+                )
+                agents[player].start_match(context)
+            except Exception as exc:
+                engine.forfeit(player, f"bot failure during start_match: {exc}")
+                break
+
+        for player in (Player.A, Player.B):
+            if engine.winner is not None:
+                break
             try:
                 clocks.start(player)
                 placements = agents[player].place_ships(self.rules, clocks.remaining[player])
@@ -66,7 +101,15 @@ class LocalRunner:
                     engine.forfeit(player, "timeout")
                     break
                 result = engine.fire(player, int(shot[0]), int(shot[1]))
-                observations[player].apply_result(result_to_public(result))
+                public_result = result_to_public(result)
+                observations[player].apply_result(public_result)
+                defender = player.opponent
+                trackers[defender].observe(public_result)
+                try:
+                    agents[defender].observe_opponent_shot(public_result, clocks.remaining[defender])
+                except Exception as exc:
+                    if engine.winner is None:
+                        engine.forfeit(defender, f"bot failure during observe_opponent_shot: {exc}")
                 turns += 1
             except InvalidAction as exc:
                 if clocks._charging is player:
@@ -81,4 +124,24 @@ class LocalRunner:
                 engine.forfeit(player, f"bot failure: {exc}")
 
         assert engine.winner is not None
-        return MatchReport(engine.winner, engine.termination_reason or "ended", turns, dict(clocks.remaining), match_id)
+        report = MatchReport(engine.winner, engine.termination_reason or "ended", turns, dict(clocks.remaining), match_id)
+        for player in (Player.A, Player.B):
+            won = report.winner is player
+            trackers[player].finish(won, turns)
+            _call_end_match(agents[player], MatchEnd(won, report.winner, report.reason, turns))
+            _save_memory(memory_sessions[player])
+        return report
+
+
+def _call_end_match(agent: Agent, result: MatchEnd) -> None:
+    try:
+        agent.end_match(result)
+    except Exception:
+        return
+
+
+def _save_memory(session: MemorySession) -> None:
+    try:
+        session.save()
+    except Exception:
+        return
