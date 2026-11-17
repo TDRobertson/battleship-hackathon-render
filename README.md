@@ -34,6 +34,9 @@ What you see during a match:
 - **Sail-in.** Both fleets arrive in formation and curve onto the positions
   the bots chose, and each carrier launches its aircraft, which circle over
   their own fleet.
+- **Setting.** Islands, a lighthouse, rocks, hazy mountains, sunset clouds and
+  gulls surround the battle area, placed clear of the grids and the lanes the
+  fleets sail in on.
 - **Wrecks.** Sunk ships stay as burnt-out hulls with smoke, an oil slick and
   drifting debris.
 - **Gunfire.** Turrets swing onto the target and the shell arcs across. When it

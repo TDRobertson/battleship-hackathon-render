@@ -345,6 +345,109 @@ function buildShip(type, length, team) {
   return g;
 }
 
+/* ---------- scenery ----------
+   Islands, rocks, a lighthouse, distant mountains, clouds and gulls. Everything sits clear of the two grids, the
+   lanes the fleets sail in on (|z| < 11) and the camera positions, so it frames the battle without getting in its way. */
+scene.fog = new THREE.Fog(HORIZON.getHex(), 70, 330);          // haze for anything far off; the water and sky shade themselves
+const scenery = new THREE.Group(); scene.add(scenery);
+const live = { beams: [], clouds: [], gulls: [], surf: [] };
+let bgSeed = 20261117;
+function bgr(a, b) { bgSeed = (Math.imul(bgSeed, 1664525) + 1013904223) | 0; return a + (b - a) * ((bgSeed >>> 0) / 4294967296); }
+function lump(geo, amount) {
+  /* nudge vertices (the same way for coincident ones) so shapes look weathered rather than machined */
+  const pos = geo.attributes.position, seen = {};
+  for (let i = 0; i < pos.count; i++) {
+    const key = pos.getX(i).toFixed(2) + ',' + pos.getY(i).toFixed(2) + ',' + pos.getZ(i).toFixed(2);
+    const j = seen[key] || (seen[key] = [bgr(-amount, amount), bgr(-amount, amount) * 0.6, bgr(-amount, amount)]);
+    pos.setXYZ(i, pos.getX(i) + j[0], pos.getY(i) + j[1], pos.getZ(i) + j[2]);
+  }
+  geo.computeVertexNormals(); return geo;
+}
+const LAND = { sand: std(0xe0c391), rock: std(0x766e66), cliff: std(0x5b5650), green: std(0x55824f), dark: std(0x3c6a45), trunk: std(0x7a5a3c), white: std(0xece6da), red: std(0xb5372c),
+  shallows: new THREE.MeshBasicMaterial({ color: 0x3aa7a6, transparent: true, opacity: 0.3, depthWrite: false }),
+  surf: new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide }),
+  lamp: new THREE.MeshBasicMaterial({ color: 0xfff0b0, fog: false }),
+  beam: new THREE.MeshBasicMaterial({ color: 0xffe9a0, transparent: true, opacity: 0.06, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false }),
+  cloud: new THREE.MeshBasicMaterial({ color: 0xf3c2a2, fog: false }), cloudDark: new THREE.MeshBasicMaterial({ color: 0xb88a96, fog: false }),
+  gull: new THREE.MeshBasicMaterial({ color: 0xf4f4f0, side: THREE.DoubleSide }) };
+function shore(g, R, squash) {
+  const sh = new THREE.Mesh(new THREE.CircleGeometry(R * 1.5, 26), LAND.shallows); sh.rotation.x = -Math.PI / 2; sh.position.y = 0.13; sh.scale.y = squash; g.add(sh);
+  const surf = new THREE.Mesh(new THREE.RingGeometry(R * 1.0, R * 1.1, 30), LAND.surf.clone()); surf.rotation.x = -Math.PI / 2; surf.position.y = 0.15; surf.scale.y = squash; g.add(surf);
+  live.surf.push({ mesh: surf, ph: bgr(0, 6) });
+}
+function palm(g, x, z, h) {
+  const t = new THREE.Group(); t.position.set(x, 0.3, z); t.rotation.set(bgr(-0.18, 0.18), bgr(0, 6.28), bgr(-0.18, 0.18));
+  t.add(cyl(0.035, 0.06, h, LAND.trunk, 0, h / 2, 0, 5));
+  for (let i = 0; i < 6; i++) { const leaf = box(0.62, 0.02, 0.15, i % 2 ? LAND.green : LAND.dark, 0.27, 0, 0), arm = new THREE.Group(); arm.add(leaf); arm.position.y = h; arm.rotation.set(0, i * 1.05, -0.45); t.add(arm); }
+  g.add(t);
+}
+function island(x, z, R, H, o) {
+  const g = new THREE.Group(), squash = o.squash || 0.8; g.position.set(x, 0, z); g.rotation.y = bgr(0, 6.28);
+  shore(g, R, squash);
+  const sand = new THREE.Mesh(lump(new THREE.CylinderGeometry(R * 0.86, R, 0.5, 16, 1), R * 0.05), LAND.sand); sand.position.y = 0.08; sand.scale.z = squash; g.add(sand);
+  const peaks = o.peaks || 2;
+  for (let i = 0; i < peaks; i++) {
+    const r = R * bgr(0.36, 0.56), hill = new THREE.Mesh(lump(new THREE.IcosahedronGeometry(1, 1), 0.16), i === 0 && o.rocky ? LAND.rock : (i % 2 ? LAND.dark : LAND.green));
+    hill.scale.set(r, H * bgr(0.6, 1), r * squash); hill.position.set(i ? bgr(-0.3, 0.3) * R : 0, 0.15, i ? bgr(-0.25, 0.25) * R : 0); g.add(hill);
+  }
+  for (let i = 0; i < (o.palms || 0); i++) { const a = bgr(0, 6.28), d = R * bgr(0.62, 0.8); palm(g, Math.cos(a) * d, Math.sin(a) * d * squash, bgr(0.8, 1.3)); }
+  if (o.lighthouse) {
+    const lh = new THREE.Group(), y0 = H * 0.75; lh.position.set(R * 0.1, y0, 0);
+    lh.add(cyl(0.2, 0.32, 2.2, LAND.white, 0, 1.1, 0, 10)); lh.add(cyl(0.262, 0.287, 0.4, LAND.red, 0, 0.75, 0, 10)); lh.add(cyl(0.222, 0.246, 0.4, LAND.red, 0, 1.6, 0, 10));
+    lh.add(cyl(0.3, 0.3, 0.06, LAND.cliff, 0, 2.23, 0, 10)); lh.add(cyl(0.15, 0.15, 0.3, LAND.lamp, 0, 2.4, 0, 8)); lh.add(cyl(0.02, 0.22, 0.22, LAND.red, 0, 2.66, 0, 8));
+    const beam = new THREE.Group(); beam.position.y = 2.4;
+    for (const d of [-1, 1]) { const c = new THREE.Mesh(new THREE.ConeGeometry(0.75, 10, 14, 1, true), LAND.beam); c.rotation.z = d * Math.PI / 2; c.position.x = d * 5; beam.add(c); }
+    lh.add(beam); live.beams.push(beam); g.add(lh);
+  }
+  scenery.add(g); return g;
+}
+function rocks(x, z, n, size) {
+  const g = new THREE.Group(); g.position.set(x, 0, z);
+  for (let i = 0; i < n; i++) {
+    const r = size * bgr(0.5, 1), rock = new THREE.Mesh(lump(new THREE.IcosahedronGeometry(1, 0), 0.22), i % 2 ? LAND.cliff : LAND.rock);
+    rock.scale.set(r, r * bgr(1, 2.2), r * bgr(0.7, 1)); rock.position.set(bgr(-1, 1) * size * 1.6, 0.1, bgr(-1, 1) * size * 1.2); rock.rotation.y = bgr(0, 6.28); g.add(rock);
+    const surf = new THREE.Mesh(new THREE.RingGeometry(r * 1.0, r * 1.25, 14), LAND.surf.clone()); surf.rotation.x = -Math.PI / 2; surf.position.set(rock.position.x, 0.15, rock.position.z); g.add(surf);
+    live.surf.push({ mesh: surf, ph: bgr(0, 6) });
+  }
+  scenery.add(g);
+}
+/* behind the grids (far side from the wide-screen camera) */
+island(-17.5, -17, 5.2, 3.2, { peaks: 3, palms: 7 });
+island(15.5, -15.5, 3.3, 2.2, { peaks: 1, rocky: true, palms: 2, lighthouse: true });
+rocks(-3, -15.5, 3, 0.7); rocks(29, -13.5, 4, 0.8);
+/* beyond the far fleet, flanking its line of advance (these frame the vertical view and the opening shots) */
+island(36, 15, 5.2, 4.2, { peaks: 3, palms: 5, rocky: true });
+island(47, -21, 7, 5.5, { peaks: 4, palms: 4 });
+island(-48, -24, 6.5, 4.8, { peaks: 3, palms: 5, rocky: true });
+rocks(-33, 14.5, 3, 0.75); rocks(8, 15, 2, 0.5);
+/* a broken ring of far mountains, mostly lost in the haze */
+for (let i = 0; i < 44; i++) {
+  if (i % 9 === 4 || i % 9 === 5) continue;
+  const a = i / 44 * Math.PI * 2 + bgr(-0.06, 0.06), d = bgr(215, 265), h = bgr(5, 17), w = bgr(30, 60);
+  const m = new THREE.Mesh(lump(new THREE.ConeGeometry(w, h, 5, 2), 4), LAND.cliff); m.position.set(Math.cos(a) * d, h / 2 - 1.5, Math.sin(a) * d); m.rotation.y = bgr(0, 6); m.scale.z = bgr(0.4, 0.8); scenery.add(m);
+}
+/* sunset clouds, high and far enough out that they never sit between a camera and the battle */
+for (let i = 0; i < 12; i++) {
+  const g = new THREE.Group(), a = bgr(0, 6.28), d = bgr(110, 240); g.position.set(Math.cos(a) * d, bgr(34, 60), Math.sin(a) * d);
+  for (let k = 0; k < 5; k++) { const puffy = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 1), k % 3 ? LAND.cloud : LAND.cloudDark); puffy.scale.set(bgr(7, 13), bgr(2, 3.6), bgr(4, 7)); puffy.position.set((k - 2) * bgr(6, 9), bgr(-1, 1), bgr(-2, 2)); g.add(puffy); }
+  scenery.add(g); live.clouds.push(g);
+}
+/* gulls wheeling over the lighthouse island */
+for (let i = 0; i < 7; i++) {
+  const g = new THREE.Group(), wings = [];
+  for (const d of [-1, 1]) { const geo = new THREE.PlaneGeometry(0.3, 0.09); geo.translate(0.15 * d, 0, 0); geo.rotateX(-Math.PI / 2); const w = new THREE.Mesh(geo, LAND.gull); g.add(w); wings.push(w); }
+  scenery.add(g); live.gulls.push({ g, wings, cx: 15.5 + bgr(-1.5, 1.5), cz: -15.5 + bgr(-1.5, 1.5), r: bgr(2.2, 5.5), alt: bgr(3.2, 5.6), w: bgr(0.35, 0.7) * (i % 2 ? 1 : -1), ph: bgr(0, 6.28) });
+}
+function stepScenery(t, dt) {
+  for (const b of live.beams) b.rotation.y = t * 0.9;
+  for (const c of live.clouds) { c.position.x += dt * 0.5; if (c.position.x > 260) c.position.x = -260; }
+  for (const s of live.surf) s.mesh.material.opacity = 0.32 + 0.22 * Math.sin(t * 0.9 + s.ph);
+  for (const b of live.gulls) {
+    const a = b.ph + b.w * t; b.g.position.set(b.cx + Math.cos(a) * b.r, b.alt + Math.sin(t * 0.8 + b.ph) * 0.3, b.cz + Math.sin(a) * b.r);
+    b.g.rotation.y = -a + (b.w > 0 ? -Math.PI : 0); const flap = Math.sin(t * 8 + b.ph) * 0.55; b.wings[0].rotation.z = -flap; b.wings[1].rotation.z = flap;
+  }
+}
+
 /* ---------- sound ----------
    Everything is synthesised by default. If sounds.js provides recordings (window.SOUNDS, built by
    scripts/pack_sounds.py) they replace the synthesised gun / hit / miss / sink sounds. */
@@ -924,7 +1027,7 @@ function placeCamera(t) {
 
 let last = performance.now(), wall = 0, skipRender = false;
 function step(dt) {
-  wall += dt; waterMat.uniforms.uT.value = wall;
+  wall += dt; waterMat.uniforms.uT.value = wall; stepScenery(wall, dt);
   if (R && !paused) {
     const active = !!cine && clock < cine.end, slowed = active && clock >= cine.slowFrom; if (cine && !active) cine = null;
     timeScale += ((slowed ? CINE_SLOW : 1) - timeScale) * Math.min(1, dt * 12);
