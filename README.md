@@ -5,15 +5,17 @@ naval battle you can watch: fleets sail in, shells arc across the water, ships
 burn and sink.
 
 **[Watch it live](https://tdrobertson.github.io/battleship-hackathon-render/viewer/)**
-(click **Sound** once it loads).
+(click once to start it with sound).
 
-![Aerial view of a match in progress](docs/images/aerial.png)
+![Opening shot: a fleet sails toward the enemy on the horizon](docs/images/opener.png)
 
 It started as a club hackathon where members wrote Battleship bots and ran them
 against each other. This repository adds a way to *show* a match, so it can be
 recorded and shared.
 
-![Slow-motion close-up of a ship being sunk](docs/images/closeup.png)
+![Aerial view of a match in progress, with each bot's targeting heatmap](docs/images/aerial.png)
+
+![Close-up riding behind a shell on its way to the target](docs/images/closeup.png)
 
 ## What it does
 
@@ -59,9 +61,9 @@ cd battleship-hackathon-render
 pip install -e .
 ```
 
-Watch the included demo match by opening `viewer/index.html` in your browser.
-The page loads Three.js and a font from a CDN, so it needs an internet
-connection.
+Watch the included demo match by opening `viewer/index.html` in your browser
+and clicking once to start. The page loads Three.js and a font from a CDN, so
+it needs an internet connection.
 
 Record a different match and watch it:
 
@@ -129,12 +131,16 @@ are. A fork gets its own link at
 
 ## Using the viewer
 
+The viewer opens on a "Click to start" screen. Browsers only allow sound after
+a click or key press, so that first interaction switches the sound on and
+starts the match from the top.
+
 | Control | Key | What it does |
 | --- | --- | --- |
-| Restart | | Play the match again from the sail-in. |
+| Restart | | Play the match again from the opening. |
 | Pause | Space | Freeze and resume. |
 | Speed | | Cycle 1x, 2x, 4x, 0.5x. |
-| Sound | M | Turn sound on or off. Browsers keep it off until you click. |
+| Sound | M | Turn sound on or off. It comes on with the click that starts the match. |
 | AI view | V | Show or hide each bot's targeting heatmap. |
 | Loop | | Restart automatically after the winner card. |
 | Load replay | | Open any replay `.json` without re-running the exporter. |
@@ -145,10 +151,10 @@ tall one gives a portrait view suited to vertical video.
 
 ### Recording a video
 
-1. Size the browser window to the shape you want.
-2. Click **Sound**, then press **H** to hide the controls.
-3. Click **Restart** (press H again to reach it) and capture the window with a
-   screen recorder such as OBS or the Windows Game Bar (Win+Alt+R).
+1. Size the browser window to the shape you want and reload the page.
+2. Start a screen recorder such as OBS or the Windows Game Bar (Win+Alt+R).
+3. Click to start, then press **H** to hide the controls. Trim the first second
+   afterwards.
 
 ### Tuning
 
@@ -224,6 +230,7 @@ src/                      # Hackathon kit: game engine, match runner, bot SDK
 examples/                 # Hackathon kit: example bots and snippets
 tests/                    # Hackathon kit: test suite
 docs/
+|-- images/               # Screenshots used in this README
 |-- hackathon_kit.md      # Original kit README: installing, running, writing bots
 |-- rules.md              # Game rules
 `-- ...                   # Remaining kit documentation
@@ -236,7 +243,10 @@ exporter only listens to the spectator hooks the match runner already provides.
 
 - The included demo is a match between two copies of the kit's `hunt-target`
   reference bot, not hackathon entries.
-- The visuals are deliberately stylised, and the recordings are of sailing-era cannon rather than modern naval guns.
+- The visuals are deliberately stylised, and the recordings are of sailing-era
+  cannon rather than modern naval guns.
+- The AI view in the demo is estimated, because the reference bot does not
+  expose its own scores.
 - The viewer is display-only; there is no interactive play.
 
 ## Credits
