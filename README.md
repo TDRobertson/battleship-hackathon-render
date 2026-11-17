@@ -44,10 +44,15 @@ What you see during a match:
   fleets sail in on.
 - **Wrecks.** Sunk ships stay as burnt-out hulls with smoke, an oil slick and
   drifting debris.
-- **Gunfire.** Turrets swing onto the target and the shell arcs across. When it
-  is a carrier's turn, one of its aircraft dives and drops a bomb instead.
-- **AI view.** Each grid glows with where the attacking bot expects ships to be
-  just before it fires, and the cell it picks is marked. Toggle it with **V**.
+- **Gunfire.** One shot at a time: turrets swing onto the target and the shell
+  arcs across. When it is a carrier's turn, one of its aircraft dives and drops
+  a bomb instead.
+- **Hits.** A hit lights its cell red while the ship is afloat, pops a "HIT" or
+  "SUNK" callout, and turns one segment of that ship's bar red in the fleet
+  display at the top. The red cells clear when the ship sinks.
+- **AI view.** Each grid glows with where the attacking bot expects ships to be,
+  updated every time it fires, and the cell it picks is marked. Toggle it with
+  **V**.
 - **Close-ups.** Some sinkings get a short slow-motion close-up, either riding
   behind the shell on its way in or cutting to the ship just before it is hit.
 
@@ -163,7 +168,7 @@ feel:
 
 | Constant | Default | Effect |
 | --- | --- | --- |
-| `TARGET_BATTLE` | `42` | Target length of the battle in seconds; shot pacing is scaled to fit. |
+| `TARGET_BATTLE` | `70` | Target length of the battle in seconds; shot pacing is scaled to fit, within limits that keep roughly one shell in the air at a time. |
 | `OPENER` | `8.0` | Length of the cinematic opening in seconds. `0` skips straight to the aerial view. |
 | `CINE_CHANCE` | `0.45` | Chance that a sinking gets a slow-motion close-up. The last one always does. |
 | `CINE_SLOW` | `0.38` | Time scale during a close-up. |
