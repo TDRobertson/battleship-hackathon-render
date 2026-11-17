@@ -22,8 +22,26 @@ recorded and shared.
    recorded shots.
 
 The viewer is a single HTML file using [Three.js](https://threejs.org/). The
-ships, water, effects and sound are all generated in code, so there are no
-models, textures or audio files to download.
+ships, water and effects are all generated in code, so there are no models or
+textures to download. Sound uses a few public-domain recordings layered with
+synthesised effects.
+
+What you see during a match:
+
+- **Opening.** A waterline shot looking up at a battleship as it sails into
+  frame, then a long-lens view down the line of advance with the enemy fleet on
+  the horizon, before the camera climbs away to the aerial view.
+- **Sail-in.** Both fleets arrive in formation and curve onto the positions
+  the bots chose, and each carrier launches its aircraft, which circle over
+  their own fleet.
+- **Wrecks.** Sunk ships stay as burnt-out hulls with smoke, an oil slick and
+  drifting debris.
+- **Gunfire.** Turrets swing onto the target and the shell arcs across. When it
+  is a carrier's turn, one of its aircraft dives and drops a bomb instead.
+- **AI view.** Each grid glows with where the attacking bot expects ships to be
+  just before it fires, and the cell it picks is marked. Toggle it with **V**.
+- **Close-ups.** Some sinkings get a short slow-motion close-up, either riding
+  behind the shell on its way in or cutting to the ship just before it is hit.
 
 ## Quick start
 
@@ -64,6 +82,33 @@ python scripts/export_replay.py --bot-a my_bot:MyAgent --bot-b other_bot:OtherAg
 | `--name-a`, `--name-b` | the bot spec | Names shown on screen. |
 | `--seed` | `2026` | Seeds both bots, so the same seed gives the same match. |
 | `--out` | `viewer/replay.json` | Where to write the replay. |
+| `--search N` | `1` | Play `N` seeds starting at `--seed` and keep the closest finish. |
+| `--no-heat` | off | Skip the AI-view heatmaps. |
+
+### Showing what your bot is thinking
+
+The AI view needs a heatmap for every shot. The exporter gets it one of two
+ways:
+
+- **From the bot.** If your bot defines `debug_heatmap()`, the exporter calls it
+  after each `choose_shot` and records the result. Return a `rows x cols` array
+  of scores for the decision just made; any scale works, higher means more
+  attractive. A neural-network bot can return its output map directly.
+
+  ```python
+  class MyAgent(Agent):
+      def choose_shot(self, observation, time_remaining):
+          self._scores = self.score_cells(observation)   # your own logic
+          return best_cell(self._scores)
+
+      def debug_heatmap(self):
+          return self._scores
+  ```
+
+- **Estimated.** Without that method, the exporter uses the kit's fleet-sampling
+  helper to work out, from exactly what the bot has observed, how likely each
+  untried cell is to hold a ship. That is what a careful player would believe,
+  not necessarily how the bot reasons, and the viewer labels it as estimated.
 
 To write a bot, see the [hackathon kit guide](docs/hackathon_kit.md) and
 [`docs/tutorial_build_bot.md`](docs/tutorial_build_bot.md).
@@ -76,6 +121,7 @@ To write a bot, see the [hackathon kit guide](docs/hackathon_kit.md) and
 | Pause | Space | Freeze and resume. |
 | Speed | | Cycle 1x, 2x, 4x, 0.5x. |
 | Sound | M | Turn sound on or off. Browsers keep it off until you click. |
+| AI view | V | Show or hide each bot's targeting heatmap. |
 | Loop | | Restart automatically after the winner card. |
 | Load replay | | Open any replay `.json` without re-running the exporter. |
 | Hide controls | H | Hide the buttons for a clean recording. |
@@ -98,9 +144,28 @@ feel:
 | Constant | Default | Effect |
 | --- | --- | --- |
 | `TARGET_BATTLE` | `42` | Target length of the battle in seconds; shot pacing is scaled to fit. |
-| `INTRO` | `7.0` | Length of the sail-in. |
-| `CINE_CHANCE` | `0.35` | Chance that a sinking gets a slow-motion close-up. The last one always does. |
-| `CINE_SLOW` | `0.28` | Time scale during a close-up. |
+| `OPENER` | `8.0` | Length of the cinematic opening in seconds. `0` skips straight to the aerial view. |
+| `CINE_CHANCE` | `0.45` | Chance that a sinking gets a slow-motion close-up. The last one always does. |
+| `CINE_SLOW` | `0.38` | Time scale during a close-up. |
+| `PLANES` | `3` | Aircraft each carrier launches. |
+
+### Changing the sound effects
+
+The four main effects (a ship firing, a hit, a miss, a ship being destroyed)
+use recordings from `viewer/sounds/`, embedded in `viewer/sounds.js` so the
+page works when opened from disk. Everything else is synthesised.
+
+To swap one:
+
+1. Replace `gun`, `hit`, `miss` or `sink` in `viewer/sounds/` (`.ogg`, `.mp3`,
+   `.wav`, `.m4a` or `.flac`). An effect with no file falls back to a
+   synthesised sound.
+2. Run `python scripts/pack_sounds.py`.
+3. Reload the viewer.
+
+`python scripts/pack_sounds.py --clear` switches to fully synthesised sound.
+Only commit audio you are allowed to redistribute, and credit it in
+`viewer/sounds/CREDITS.md`.
 
 ## Replay format
 
@@ -108,12 +173,13 @@ A replay is one JSON object. Coordinates are zero-based `[row, col]`.
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "seed": 2,
+  "heat_source": { "A": "estimate", "B": "estimate" },
   "rules": { "rows": 10, "cols": 10, "fleet": [5, 4, 3, 3, 2] },
   "players": { "A": { "name": "Bot Alpha", "bot": "hunt-target" }, "B": { "name": "Bot Bravo", "bot": "hunt-target" } },
   "placements": { "A": [ { "slot": 0, "length": 5, "cells": [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]] } ], "B": [] },
-  "shots": [ { "turn": 1, "player": "A", "row": 9, "col": 5, "outcome": "hit", "sunk": null } ],
+  "shots": [ { "turn": 1, "player": "A", "row": 9, "col": 5, "outcome": "hit", "sunk": null, "heat": "1123455320..." } ],
   "winner": "B",
   "reason": "all ships sunk",
   "turns": 72
@@ -121,7 +187,9 @@ A replay is one JSON object. Coordinates are zero-based `[row, col]`.
 ```
 
 `outcome` is `miss`, `hit` or `sunk`. When a ship is sunk, `sunk` holds its
-`slot` and `cells`.
+`slot` and `cells`. `heat` is the shooter's heatmap before that shot: one digit
+(0 to 9) per cell, row by row. `heat_source` says whether each player's
+heatmaps came from the `bot` itself or are an `estimate`.
 
 ## Project layout
 
@@ -129,10 +197,13 @@ A replay is one JSON object. Coordinates are zero-based `[row, col]`.
 viewer/
 |-- index.html            # The 3D replay viewer (single file)
 |-- replay.json           # The current replay
-`-- replay.js             # Same replay as a script, so the page works from disk
+|-- replay.js             # Same replay as a script, so the page works from disk
+|-- sounds.js             # The recordings below, embedded for the page to load
+`-- sounds/               # Source recordings (CC0) and their credits
 
 scripts/
 |-- export_replay.py      # Records a match to viewer/replay.json
+|-- pack_sounds.py        # Embeds recorded sound effects into viewer/sounds.js
 `-- organizer_*.py        # Tournament helpers from the hackathon kit
 
 src/                      # Hackathon kit: game engine, match runner, bot SDK
@@ -151,10 +222,14 @@ exporter only listens to the spectator hooks the match runner already provides.
 
 - The included demo is a match between two copies of the kit's `hunt-target`
   reference bot, not hackathon entries.
-- Sound and visuals are synthesised and deliberately stylised.
+- The visuals are deliberately stylised, and the recordings are of sailing-era cannon rather than modern naval guns.
 - The viewer is display-only; there is no interactive play.
 
 ## Credits
+
+Sound recordings are from the CC0 collection
+["Battle at sea"](https://opengameart.org/content/battle-at-sea) by Thimras on
+OpenGameArt; see [`viewer/sounds/CREDITS.md`](viewer/sounds/CREDITS.md).
 
 Built on the [Battleship AI Hackathon Kit](https://github.com/mjessey/battleship-hackathon)
 by Maximus Jessey, which provides the game engine, bot SDK and tournament

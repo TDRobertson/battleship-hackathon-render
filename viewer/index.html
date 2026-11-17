@@ -46,7 +46,12 @@
   input[type=file] { position: absolute; opacity: 0; width: 1px; height: 1px; }
   .bars { position: fixed; left: 0; right: 0; height: 0; background: #05080f; transition: height .7s ease; pointer-events: none; }
   #barT { top: 0; } #barB { bottom: 0; }
-  body.cine .bars { height: 9vh; }
+  body.cine .bars, body.opening .bars { height: 9vh; }
+  #top { transition: opacity .8s; } body.opening #top { opacity: 0; }
+  #ai { bottom: clamp(58px, 12vh, 112px); text-align: center; font-size: clamp(10px, 1.7vmin, 14px); letter-spacing: .14em; text-transform: uppercase;
+    color: var(--dim); text-shadow: 0 1px 6px rgba(0,0,0,.8); transition: opacity .6s; padding: 0 12px; }
+  #ai b { color: var(--ink); font-weight: 600; }
+  #ai.off, body.opening #ai, body.cine #ai { opacity: 0; }
   #msg { top: 40%; text-align: center; padding: 24px; font-size: 18px; display: none; }
 </style>
 </head>
@@ -59,18 +64,21 @@
   <div class="side b"><div class="name" id="nameB"></div><div class="pips" id="pipsB"></div></div>
 </div>
 <div class="hud" id="card"><div class="kicker" id="kicker"></div><div class="title" id="title"></div><div class="sub" id="sub"></div></div>
+<div class="hud off" id="ai"></div>
 <div class="hud" id="msg">No replay found. Run <b>python scripts/export_replay.py</b>, or load a replay .json file below.</div>
 <div class="hud" id="bar">
   <button id="restart">Restart</button>
   <button id="pause">Pause</button>
   <button id="speed">Speed 1x</button>
   <button id="sound">Sound off</button>
+  <button id="aiview" title="Show where each bot expects ships (V)">AI view on</button>
   <button id="loop">Loop on</button>
   <label class="btn">Load replay<input type="file" id="file" accept=".json,application/json"></label>
   <button id="hide" title="Press H to bring the controls back">Hide controls (H)</button>
 </div>
 
 <script src="replay.js"></script>
+<script src="sounds.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 (function () {
@@ -79,9 +87,11 @@ const $ = id => document.getElementById(id);
 if (!window.THREE) { $('msg').style.display = 'block'; $('msg').textContent = 'Could not load the 3D library (needs an internet connection).'; return; }
 
 /* ---------- constants ---------- */
-const GAP = 3, INTRO = 7.0, FLIGHT = 0.75, TARGET_BATTLE = 42;
-const CINE_CHANCE = 0.35;   // chance that a sinking gets a slow-motion close-up (the final one always does)
-const CINE_SLOW = 0.28;     // time scale during a close-up
+const OPENER = 8.0;         // length of the cinematic opening before the aerial view (0 turns it off)
+const GAP = 3, INTRO = OPENER + 8.5, FLIGHT = 0.75, TARGET_BATTLE = 42, CRUISE = 1.5;
+const CINE_CHANCE = 0.45;   // chance that a sinking gets a slow-motion close-up (the final one always does)
+const CINE_SLOW = 0.38;     // time scale during a close-up
+const PLANES = 3;           // aircraft each carrier launches
 const TEAM = {
   A: { hull: 0x8b939c, deck: 0xb9b2a6, accent: 0xff7a45, css: 'va' },
   B: { hull: 0x3d5068, deck: 0x8fa3b5, accent: 0x3fd0c9, css: 'vb' },
@@ -92,20 +102,31 @@ const SHIP_NAMES = { carrier: 'Carrier', battleship: 'Battleship', cruiser: 'Cru
 const canvas = $('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 600);
 const HORIZON = new THREE.Color(0xe79a68);
 
-(function sky() {
-  const cv = document.createElement('canvas'); cv.width = 4; cv.height = 256;
-  const g = cv.getContext('2d'), grad = g.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0, '#14224a'); grad.addColorStop(0.22, '#5a4a72'); grad.addColorStop(0.4, '#e79a68'); grad.addColorStop(1, '#e79a68');
-  g.fillStyle = grad; g.fillRect(0, 0, 4, 256);
-  scene.background = new THREE.CanvasTexture(cv);
-})();
+const SUN_DIR = new THREE.Vector3(-30, 9, -40).normalize();
+const skyDome = new THREE.Mesh(new THREE.SphereGeometry(450, 32, 16), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, fog: false,
+  uniforms: { uSun: { value: SUN_DIR }, uHorizon: { value: HORIZON } },
+  vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `
+    uniform vec3 uSun; uniform vec3 uHorizon; varying vec3 vDir;
+    void main(){ vec3 d = normalize(vDir); float h = max(d.y, 0.0);
+      vec3 col = mix(uHorizon, vec3(0.40,0.31,0.47), smoothstep(0.0, 0.22, h));
+      col = mix(col, vec3(0.07,0.12,0.28), smoothstep(0.16, 0.7, h));
+      float s = max(dot(d, uSun), 0.0);
+      col += vec3(1.0,0.62,0.32) * (pow(s, 12.0) * 0.35 + pow(s, 90.0) * 0.5) + vec3(1.0,0.9,0.7) * smoothstep(0.9993, 0.9997, s);
+      gl_FragColor = vec4(col, 1.0); }`,
+}));
+skyDome.renderOrder = -1; scene.add(skyDome); scene.background = new THREE.Color(0xe79a68);
 
 scene.add(new THREE.HemisphereLight(0xffe2c2, 0x10294a, 0.85));
-const sun = new THREE.DirectionalLight(0xffb27a, 1.1); sun.position.set(-30, 14, -40); scene.add(sun);
+const sun = new THREE.DirectionalLight(0xffb27a, 1.1); sun.position.copy(SUN_DIR).multiplyScalar(50); scene.add(sun);
+sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.03;
+Object.assign(sun.shadow.camera, { left: -26, right: 26, top: 14, bottom: -14, near: 5, far: 110 }); sun.shadow.camera.updateProjectionMatrix();
 const fill = new THREE.DirectionalLight(0x8fb4ff, 0.35); fill.position.set(20, 30, 30); scene.add(fill);
 const flash = new THREE.PointLight(0xffa040, 0, 18); scene.add(flash);
 
@@ -158,7 +179,7 @@ function makePool(n, blending) {
   }
   return { items, next: 0 };
 }
-const glow = makePool(450, THREE.AdditiveBlending), puff = makePool(650, THREE.NormalBlending);
+const glow = makePool(500, THREE.AdditiveBlending), puff = makePool(950, THREE.NormalBlending);
 function spawn(pool, o) {
   const p = pool.items[pool.next]; pool.next = (pool.next + 1) % pool.items.length;
   p.life = p.max = o.life; p.vx = o.vx || 0; p.vy = o.vy || 0; p.vz = o.vz || 0; p.g = o.g || 0;
@@ -218,28 +239,54 @@ function addFoam(g, m, L, W) {
   const f = new THREE.Mesh(new THREE.ShapeGeometry(hullShape(L * 1.1, W * 1.55)), m.foam); f.rotation.x = -Math.PI / 2; f.position.y = 0.03; g.add(f);
 }
 function turret(g, m, x, y, facing, barrels, big) {
-  const t = new THREE.Group(), r = big ? 0.17 : 0.11, len = big ? 0.5 : 0.32;
+  const t = new THREE.Group(), r = big ? 0.17 : 0.11, len = big ? 0.5 : 0.32, guns = [];
   t.add(cyl(r * 0.85, r, 0.11, m.steel, 0, 0, 0, 6));
   t.add(box(r * 1.5, 0.09, r * 1.5, m.deck, -r * 0.1, 0.02, 0));
   for (let i = 0; i < barrels; i++) {
     const z = (i - (barrels - 1) / 2) * (big ? 0.085 : 0.07), b = cyl(0.022, 0.026, len, m.dark, r * 0.6 + len / 2, 0.03, z, 5); b.rotation.z = Math.PI / 2; t.add(b);
+    b.userData.rest = b.position.x; guns.push(b);
   }
-  t.position.set(x, y, 0); t.rotation.y = facing; t.userData = { rest: facing, aim: facing, x };
+  t.position.set(x, y, 0); t.rotation.y = facing; t.userData = { rest: facing, aim: facing, x, guns, kick: 0 };
   g.add(t); g.userData.turrets.push(t);
 }
 function mast(g, m, x, y, h, z) {
   g.add(cyl(0.015, 0.02, h, m.dark, x, y + h / 2, z || 0, 5)); g.add(box(0.02, 0.02, 0.26, m.dark, x, y + h * 0.7, z || 0));
-  g.add(box(0.16, 0.05, 0.03, m.steel, x, y + h + 0.02, z || 0));
+  const radar = box(0.18, 0.06, 0.03, m.steel, x, y + h + 0.03, z || 0); g.add(radar); g.userData.spin.push(radar);
 }
-function funnel(g, m, x, y, r, h) { g.add(cyl(r * 0.85, r, h, m.steel, x, y + h / 2, 0)); g.add(cyl(r * 0.9, r * 0.9, 0.05, m.dark, x, y + h, 0)); }
+function funnel(g, m, x, y, r, h) {
+  g.add(cyl(r * 0.85, r, h, m.steel, x, y + h / 2, 0)); g.add(cyl(r * 0.9, r * 0.9, 0.05, m.dark, x, y + h, 0)); g.add(cyl(r * 0.87, r * 0.87, 0.04, m.accent, x, y + h * 0.7, 0));
+  g.userData.stacks.push([x, y + h + 0.05]);
+}
+/* small fittings that only read up close: portholes, railings, lifeboats, anchors */
+function fittings(g, m, L, W, boats) {
+  for (let x = -L * 0.36; x <= L * 0.3; x += 0.34) g.add(box(0.07, 0.035, W + 0.012, m.dark, x, 0.19, 0));
+  for (const z of [-1, 1]) {
+    g.add(box(L * 0.74, 0.012, 0.012, m.steel, -L * 0.06, DECK + 0.1, z * (W / 2 - 0.035)));
+    for (let x = -L * 0.42; x <= L * 0.3; x += 0.3) g.add(box(0.012, 0.1, 0.012, m.steel, x, DECK + 0.05, z * (W / 2 - 0.035)));
+    g.add(box(0.05, 0.1, 0.03, m.dark, L * 0.4, 0.16, z * W * 0.2));
+    for (const bx of boats || []) { g.add(box(0.26, 0.06, 0.09, m.paint, bx, DECK + 0.13, z * (W / 2 - 0.1))); g.add(box(0.2, 0.02, 0.07, m.accent, bx, DECK + 0.17, z * (W / 2 - 0.1))); }
+  }
+}
 function bridge(g, m, w, h, d, x, y, z) {
   g.add(box(w, h, d, m.deck, x, y + h / 2, z || 0)); g.add(box(w + 0.01, 0.045, d + 0.01, m.glass, x, y + h * 0.72, z || 0));
 }
 function flag(g, m, x) { g.add(cyl(0.01, 0.01, 0.34, m.dark, x, DECK + 0.17, 0, 4)); g.add(box(0.16, 0.1, 0.012, m.accent, x - 0.09, DECK + 0.29, 0)); }
-function aircraft(g, m, x, z, yaw) {
-  const a = new THREE.Group(); a.add(box(0.24, 0.035, 0.045, m.plane, 0, 0, 0)); a.add(box(0.07, 0.015, 0.26, m.plane, 0.01, 0.005, 0));
-  a.add(box(0.04, 0.06, 0.012, m.plane, -0.11, 0.035, 0)); a.add(box(0.03, 0.012, 0.1, m.plane, -0.11, 0.01, 0));
-  a.position.set(x, 0.385, z); a.rotation.y = yaw; g.add(a);
+function planeModel(m) {
+  const a = new THREE.Group(); a.add(box(0.26, 0.04, 0.05, m.plane, 0, 0, 0)); a.add(box(0.075, 0.015, 0.28, m.plane, 0.015, 0.005, 0));
+  a.add(box(0.075, 0.016, 0.05, m.accent, 0.015, 0.006, 0.135)); a.add(box(0.075, 0.016, 0.05, m.accent, 0.015, 0.006, -0.135));
+  a.add(box(0.045, 0.065, 0.012, m.accent, -0.115, 0.04, 0)); a.add(box(0.035, 0.012, 0.11, m.plane, -0.115, 0.01, 0));
+  a.add(box(0.02, 0.05, 0.05, m.dark, 0.14, 0, 0));
+  return a;
+}
+function aircraft(g, m, x, z, yaw) { const a = planeModel(m); a.position.set(x, 0.385, z); a.rotation.y = yaw; g.add(a); }
+function finish(g, m) {
+  g.traverse(o => { if (o.isMesh && o.material !== m.foam && o.material !== m.glass) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
+const CHARRED = new Map();
+function charred(mat) {
+  if (!CHARRED.has(mat)) { const c = mat.clone(); c.color.multiplyScalar(mat.isMeshBasicMaterial ? 0.08 : 0.42); CHARRED.set(mat, c); }
+  return CHARRED.get(mat);
 }
 function shipType(length, index, lengths) {
   if (length >= 5) return 'carrier'; if (length === 4) return 'battleship'; if (length <= 2) return 'destroyer';
@@ -247,7 +294,7 @@ function shipType(length, index, lengths) {
 }
 function buildShip(type, length, team) {
   const m = mats(team), g = new THREE.Group(), L = length - 0.22;
-  g.userData = { turrets: [], deckY: DECK + 0.03 };
+  g.userData = { turrets: [], spin: [], stacks: [], deckY: DECK + 0.03 };
   if (type === 'submarine') {
     const bl = L - 0.9, body = cyl(0.2, 0.2, bl, m.sub, 0.05, 0.06, 0, 10); body.rotation.z = Math.PI / 2; g.add(body);
     const nose = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 6), m.sub); nose.scale.x = 1.7; nose.position.set(0.05 + bl / 2, 0.06, 0); g.add(nose);
@@ -268,8 +315,10 @@ function buildShip(type, length, team) {
     const angled = box(L * 0.5, 0.008, 0.03, m.paint, -0.4, 0.374, -0.42); angled.rotation.y = -0.1; g.add(angled);
     g.add(box(0.05, 0.008, 0.7, m.accent, L * 0.44, 0.374, 0));
     g.add(box(0.85, 0.26, 0.2, m.hull, 0.35, 0.5, 0.32)); bridge(g, m, 0.5, 0.2, 0.19, 0.45, 0.63, 0.32);
-    g.add(cyl(0.05, 0.06, 0.2, m.steel, 0.1, 0.72, 0.32)); mast(g, m, 0.5, 0.83, 0.36, 0.32);
-    aircraft(g, m, 1.35, 0.12, 0.25); aircraft(g, m, 0.95, 0.22, 0.25); aircraft(g, m, -1.3, 0.24, -0.3); aircraft(g, m, -1.65, 0.2, -0.3); aircraft(g, m, -0.6, -0.5, 1.2);
+    g.add(cyl(0.05, 0.06, 0.2, m.steel, 0.1, 0.72, 0.32)); g.userData.stacks.push([0.1, 0.84, 0.32]); mast(g, m, 0.5, 0.83, 0.36, 0.32);
+    for (let x = -L * 0.36; x <= L * 0.3; x += 0.34) g.add(box(0.07, 0.035, 0.752, m.dark, x, 0.19, 0));
+    for (const z of [-0.47, 0.47]) g.add(box(L * 0.9, 0.03, 0.03, m.steel, -0.02, 0.385, z));
+    aircraft(g, m, -1.3, 0.24, -0.3); aircraft(g, m, -1.65, 0.2, -0.3);   // parked; the rest fly (see makePlanes)
     g.userData.deckY = 0.385;
     return g;
   }
@@ -281,102 +330,193 @@ function buildShip(type, length, team) {
     g.add(cyl(0.15, 0.17, 0.12, m.hull, 0.92, DECK + 0.06, 0));
     turret(g, m, 1.32, DECK + 0.06, 0, 3, true); turret(g, m, 0.92, DECK + 0.18, 0, 3, true); turret(g, m, -1.22, DECK + 0.06, Math.PI, 3, true);
     for (const z of [-0.2, 0.2]) { g.add(box(0.14, 0.08, 0.1, m.steel, -0.1, DECK + 0.18, z * 1.15)); g.add(box(0.14, 0.08, 0.1, m.steel, -0.8, DECK + 0.05, z)); }
-    flag(g, m, -L / 2 + 0.12);
+    flag(g, m, -L / 2 + 0.12); fittings(g, m, L, 0.62, [-0.45, 0.55]);
   } else if (type === 'cruiser') {
     g.add(box(1.0, 0.14, 0.38, m.hull, -0.08, DECK + 0.07, 0)); bridge(g, m, 0.32, 0.28, 0.28, 0.22, DECK + 0.14, 0);
     mast(g, m, 0.05, DECK + 0.14, 0.5); funnel(g, m, -0.28, DECK + 0.14, 0.09, 0.3);
     g.add(box(0.22, 0.1, 0.24, m.accent, -0.55, DECK + 0.19, 0));
-    turret(g, m, 0.88, DECK + 0.06, 0, 2, true); turret(g, m, -0.95, DECK + 0.06, Math.PI, 2, true); flag(g, m, -L / 2 + 0.1);
+    turret(g, m, 0.88, DECK + 0.06, 0, 2, true); turret(g, m, -0.95, DECK + 0.06, Math.PI, 2, true); flag(g, m, -L / 2 + 0.1); fittings(g, m, L, 0.62, [-0.3]);
   } else {
     g.add(box(0.55, 0.14, 0.32, m.hull, -0.12, DECK + 0.07, 0)); bridge(g, m, 0.22, 0.18, 0.24, -0.02, DECK + 0.14, 0);
     mast(g, m, -0.16, DECK + 0.14, 0.34); g.add(cyl(0.05, 0.06, 0.16, m.steel, -0.3, DECK + 0.22, 0));
     g.add(box(0.16, 0.06, 0.2, m.accent, -0.6, DECK + 0.04, 0));
-    turret(g, m, 0.42, DECK + 0.06, 0, 2, false);
+    turret(g, m, 0.42, DECK + 0.06, 0, 2, false); fittings(g, m, L, 0.52);
   }
   return g;
 }
 
-/* ---------- sound (all synthesised, no audio files) ---------- */
+/* ---------- sound ----------
+   Everything is synthesised by default. If sounds.js provides recordings (window.SOUNDS, built by
+   scripts/pack_sounds.py) they replace the synthesised gun / hit / miss / sink sounds. */
 const sfx = (function () {
-  let ctx = null, master, damp, bus, noiseBuf, on = false, focus = 0, slow = 1;
-  function init() {
-    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return false;
-    ctx = new AC();
+  let ctx = null, master, damp, bus, drive, noiseBuf, on = false, focus = 0, slow = 1, base = 0;
+  const samples = {};
+  function graph(c) {
+    ctx = c;
     master = ctx.createGain(); master.gain.value = 0.0001;
-    const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -16; comp.ratio.value = 5;
-    damp = ctx.createBiquadFilter(); damp.type = 'lowpass'; damp.frequency.value = 1300; damp.Q.value = 0.4;   // heard from high above
+    const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -5; comp.knee.value = 4; comp.ratio.value = 3; comp.attack.value = 0.003; comp.release.value = 0.09;   // a safety limiter only: heavier compression lifts every tail into a constant roar
+    damp = ctx.createBiquadFilter(); damp.type = 'lowpass'; damp.frequency.value = 2400; damp.Q.value = 0.3;      // heard from high above
     bus = ctx.createGain();
-    const echo = ctx.createDelay(1); echo.delayTime.value = 0.21;                                              // sound rolling over open water
-    const fb = ctx.createGain(); fb.gain.value = 0.28;
-    const echoTone = ctx.createBiquadFilter(); echoTone.type = 'lowpass'; echoTone.frequency.value = 700;
-    const echoMix = ctx.createGain(); echoMix.gain.value = 0.3;
-    bus.connect(damp); bus.connect(echo); echo.connect(echoTone); echoTone.connect(fb); fb.connect(echo); echoTone.connect(echoMix); echoMix.connect(damp);
+    /* low layers go through a soft clipper: the added harmonics are what give a boom weight on small speakers */
+    drive = ctx.createGain(); drive.gain.value = 2.2;
+    const shaper = ctx.createWaveShaper(), curve = new Float32Array(2048);
+    for (let i = 0; i < 2048; i++) { const x = i / 1023.5 - 1; curve[i] = Math.tanh(2.4 * x); }
+    shaper.curve = curve; shaper.oversample = '2x';
+    const driveOut = ctx.createGain(); driveOut.gain.value = 0.42; drive.connect(shaper); shaper.connect(driveOut); driveOut.connect(bus);
+    /* open-air tail: a generated impulse response (decaying, darkening noise) instead of a metallic echo */
+    const len = Math.floor(ctx.sampleRate * 0.9), ir = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch); let lp = 0;
+      for (let i = 0; i < len; i++) { const t = i / len, a = 0.04 + 0.5 * t; lp += (Math.random() * 2 - 1 - lp) * (1 - a * 1.6 > 0.05 ? 1 - a * 1.6 : 0.05); d[i] = lp * Math.pow(1 - t, 2.6); }
+    }
+    const verb = ctx.createConvolver(); verb.buffer = ir; const verbG = ctx.createGain(); verbG.gain.value = 0.06;                 // a touch of air; shots land every half second, so anything longer smears
+    bus.connect(damp); bus.connect(verb); verb.connect(verbG); verbG.connect(damp);
     damp.connect(comp); comp.connect(master); master.connect(ctx.destination);
-    noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+    noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 3, ctx.sampleRate);
     const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-    /* ocean bed: slow swell plus a little wind */
+  }
+  function ambience() {
     const sea = ctx.createBufferSource(); sea.buffer = noiseBuf; sea.loop = true;
-    const seaF = ctx.createBiquadFilter(); seaF.type = 'lowpass'; seaF.frequency.value = 420;
-    const seaG = ctx.createGain(); seaG.gain.value = 0.16;
-    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.13; const lfoG = ctx.createGain(); lfoG.gain.value = 0.07;
+    const seaF = ctx.createBiquadFilter(); seaF.type = 'lowpass'; seaF.frequency.value = 380;
+    const seaG = ctx.createGain(); seaG.gain.value = 0.1;
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.13; const lfoG = ctx.createGain(); lfoG.gain.value = 0.045;
     lfo.connect(lfoG); lfoG.connect(seaG.gain); sea.connect(seaF); seaF.connect(seaG); seaG.connect(bus); sea.start(); lfo.start();
     const wind = ctx.createBufferSource(); wind.buffer = noiseBuf; wind.loop = true; wind.playbackRate.value = 0.7;
-    const windF = ctx.createBiquadFilter(); windF.type = 'bandpass'; windF.frequency.value = 900; windF.Q.value = 0.5;
-    const windG = ctx.createGain(); windG.gain.value = 0.035; wind.connect(windF); windF.connect(windG); windG.connect(bus); wind.start();
-    return true;
+    const windF = ctx.createBiquadFilter(); windF.type = 'bandpass'; windF.frequency.value = 800; windF.Q.value = 0.5;
+    const windG = ctx.createGain(); windG.gain.value = 0.02; wind.connect(windF); windF.connect(windG); windG.connect(bus); wind.start();
   }
-  function out(x) {
-    if (!ctx.createStereoPanner) return bus;
-    const p = ctx.createStereoPanner(); p.pan.value = Math.max(-0.7, Math.min(0.7, (x || 0) / 16)); p.connect(bus); return p;
+  function loadSamples() {
+    const src = window.SOUNDS || {};
+    for (const name of Object.keys(src)) {
+      try {
+        const bin = atob(String(src[name]).split(',').pop()), bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        ctx.decodeAudioData(bytes.buffer, buf => { samples[name] = buf; }, () => {});
+      } catch (e) { /* ignore a bad recording and keep the synthesised sound */ }
+    }
+  }
+  function out(x, driven) {
+    const dest = driven ? drive : bus;
+    if (!ctx.createStereoPanner) return dest;
+    const p = ctx.createStereoPanner(); p.pan.value = Math.max(-0.7, Math.min(0.7, (x || 0) / 16)); p.connect(dest); return p;
   }
   /* sound from far below arrives a beat late; close-ups are immediate */
-  const when = () => ctx.currentTime + 0.02 + 0.16 * (1 - focus);
+  const when = () => ctx.currentTime + base + 0.02 + 0.16 * (1 - focus);
+  function env(g, t, peak, attack, dur) {
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  }
   function noise(o) {
     const k = slow, t = when() + (o.at || 0), dur = o.dur / k;
-    const src = ctx.createBufferSource(); src.buffer = noiseBuf; src.loop = true; src.playbackRate.value = (0.8 + Math.random() * 0.4) * k;
-    const f = ctx.createBiquadFilter(); f.type = o.type || 'lowpass'; f.Q.value = o.q || 0.7;
+    const src = ctx.createBufferSource(); src.buffer = noiseBuf; src.loop = true; src.playbackRate.value = (0.85 + Math.random() * 0.3) * k;
+    const f = ctx.createBiquadFilter(); f.type = o.type || 'lowpass'; f.Q.value = o.q || 0.5;
     f.frequency.setValueAtTime(o.f0 * k, t); f.frequency.exponentialRampToValueAtTime(Math.max(30, o.f1 * k), t + dur);
-    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(o.gain, t + (o.attack || 0.008)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    src.connect(f); f.connect(g); g.connect(out(o.x)); src.start(t, Math.random()); src.stop(t + dur + 0.05);
+    const g = ctx.createGain(); env(g, t, o.gain, o.attack || 0.004, dur);
+    src.connect(f); f.connect(g); g.connect(out(o.x, o.drive)); src.start(t, Math.random() * 2); src.stop(t + dur + 0.05);
   }
   function tone(o) {
     const k = slow, t = when() + (o.at || 0), dur = o.dur / k;
     const osc = ctx.createOscillator(); osc.type = o.wave || 'sine';
-    osc.frequency.setValueAtTime(o.f0 * k, t); osc.frequency.exponentialRampToValueAtTime(Math.max(20, o.f1 * k), t + dur);
-    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(o.gain, t + (o.attack || 0.006)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    osc.connect(g); g.connect(out(o.x)); osc.start(t); osc.stop(t + dur + 0.05);
+    osc.frequency.setValueAtTime(o.f0 * k, t); osc.frequency.exponentialRampToValueAtTime(Math.max(18, o.f1 * k), t + (o.sweep || o.dur) / k);
+    const g = ctx.createGain(); env(g, t, o.gain, o.attack || 0.003, dur);
+    let node = osc;
+    if (o.lp) { const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = o.lp * k; osc.connect(f); node = f; }
+    node.connect(g); g.connect(out(o.x, o.drive)); osc.start(t); osc.stop(t + dur + 0.05);
+  }
+  function sample(name, x, gain, at) {
+    const buf = samples[name]; if (!buf) return false;
+    const src = ctx.createBufferSource(); src.buffer = buf; src.playbackRate.value = (0.92 + Math.random() * 0.16) * slow;
+    const g = ctx.createGain(); g.gain.value = gain; src.connect(g); g.connect(out(x));
+    /* cannon recordings are mostly sub-bass; a saturated copy adds harmonics that small speakers can reproduce */
+    const w = ctx.createGain(); w.gain.value = gain * 0.2; src.connect(w); w.connect(out(x, true));
+    src.start(when() + (at || 0)); return true;
   }
   const ready = () => on && ctx && !skipRender;
-  return {
+  const S = {
+    /* naval gun: sharp crack, driven low thump, body, then a long rolling tail */
+    gun(x) {
+      const rec = sample('gun', x, 0.6);          // the recording is nearly all sub-bass, so the crack and body stay on top
+      noise({ x, type: 'bandpass', q: 0.4, f0: 2600, f1: 900, dur: 0.08, gain: 0.7 });
+      noise({ x, type: 'bandpass', q: 0.5, f0: 700, f1: 380, dur: 0.22, gain: 0.9 });
+      if (rec) return;
+      tone({ x, drive: true, f0: 150, f1: 46, sweep: 0.12, dur: 0.34, gain: 0.7 });
+      tone({ x, drive: true, wave: 'triangle', f0: 240, f1: 70, sweep: 0.1, dur: 0.22, gain: 0.35 });
+      noise({ x, drive: true, f0: 900, f1: 130, dur: 0.45, gain: 0.6 });
+    },
+    /* shell striking steel: crack, a short metallic ring, heavy low blast, falling debris */
+    hit(x) {
+      const rec = sample('hit', x, 0.9);
+      noise({ x, type: 'bandpass', q: 0.4, f0: 3400, f1: 1200, dur: 0.1, gain: 1.0 });
+      noise({ x, type: 'bandpass', q: 0.5, f0: 900, f1: 420, dur: 0.4, gain: 1.6 });
+      if (rec) return;
+      tone({ x, wave: 'triangle', f0: 392, f1: 350, dur: 0.3, gain: 0.07 }); tone({ x, wave: 'triangle', f0: 547, f1: 505, dur: 0.22, gain: 0.05 });
+      tone({ x, drive: true, f0: 170, f1: 36, sweep: 0.2, dur: 0.6, gain: 1.0 });
+      noise({ x, drive: true, f0: 1500, f1: 90, dur: 0.8, gain: 0.95 });
+    },
+    /* magazine going up: two overlapping blasts and a very long tail */
+    boom(x, at) {
+      at = at || 0; if (samples.sink) { tone({ x, at, drive: true, f0: 130, f1: 26, sweep: 0.3, dur: 0.7, gain: 0.5 }); return; }
+      noise({ x, at, type: 'bandpass', q: 0.4, f0: 3000, f1: 800, dur: 0.12, gain: 1.0 });
+      noise({ x, at, type: 'bandpass', q: 0.5, f0: 800, f1: 300, dur: 0.9, gain: 1.6 });
+      tone({ x, at, drive: true, f0: 130, f1: 26, sweep: 0.35, dur: 1.1, gain: 1.0 });
+      tone({ x, at, drive: true, wave: 'triangle', f0: 210, f1: 48, sweep: 0.3, dur: 0.8, gain: 0.4 });
+      noise({ x, at, drive: true, f0: 1300, f1: 60, dur: 1.4, gain: 1.0 });
+      noise({ x, at: at + 0.22, drive: true, f0: 700, f1: 50, dur: 1.0, gain: 0.6 });
+    },
+    /* shell into water: a deep whump, the column going up, then spray raining back down */
+    splash(x) {
+      if (sample('miss', x, 0.55)) return;
+      tone({ x, drive: true, f0: 130, f1: 44, sweep: 0.14, dur: 0.3, gain: 0.22 });
+      noise({ x, f0: 900, f1: 250, dur: 0.5, gain: 0.5 });
+      noise({ x, type: 'bandpass', q: 0.6, f0: 2200, f1: 700, dur: 0.7, gain: 0.7, attack: 0.04 });
+    },
+    sink(x) {
+      if (sample('sink', x, 0.9, 0.2)) return;
+      noise({ x, at: 0.4, type: 'bandpass', q: 0.5, f0: 800, f1: 220, dur: 2.4, gain: 0.25, attack: 0.5 });       // water rushing in
+      tone({ x, at: 0.3, wave: 'sawtooth', lp: 260, f0: 68, f1: 34, dur: 2.0, gain: 0.2, attack: 0.4 });        // hull groan
+      tone({ x, at: 1.0, wave: 'sawtooth', lp: 320, f0: 91, f1: 47, dur: 1.5, gain: 0.12, attack: 0.3 });
+    },
+    /* aircraft diving past: engine drone falling in pitch, then the bomb whistle */
+    dive(x) {
+      tone({ x, wave: 'sawtooth', lp: 700, f0: 190, f1: 95, dur: 1.9, gain: 0.16, attack: 0.7 });
+      tone({ x, wave: 'sawtooth', lp: 500, f0: 127, f1: 63, dur: 1.9, gain: 0.12, attack: 0.7 });
+      noise({ x, type: 'bandpass', q: 0.8, f0: 500, f1: 260, dur: 1.9, gain: 0.1, attack: 0.8 });
+    },
+    whistle(x) { tone({ x, f0: 1500, f1: 620, dur: 0.5, gain: 0.05, attack: 0.1 }); },
+    /* ship's horn for the opening shot */
+    horn(x) {
+      for (const f of [87, 131, 175]) tone({ x, wave: 'sawtooth', lp: 520, f0: f, f1: f * 0.985, dur: 2.6, gain: 0.2, attack: 0.25 });
+      noise({ x, type: 'bandpass', q: 0.6, f0: 300, f1: 260, dur: 2.6, gain: 0.08, attack: 0.3 });
+    },
+  };
+  const api = {
     toggle() {
-      if (!ctx && !init()) return false;
+      if (!ctx) { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return false; graph(new AC()); ambience(); loadSamples(); }
       on = !on; if (on) ctx.resume();
-      master.gain.cancelScheduledValues(ctx.currentTime); master.gain.setTargetAtTime(on ? 0.9 : 0.0001, ctx.currentTime, 0.15);
+      master.gain.cancelScheduledValues(ctx.currentTime); master.gain.setTargetAtTime(on ? 0.85 : 0.0001, ctx.currentTime, 0.15);
       return on;
     },
     /* f: 0 = aerial view, 1 = close-up; s: current time scale (slow motion lowers pitch) */
-    view(f, s) { focus = f; slow = 0.55 + 0.45 * s; if (ctx) damp.frequency.setTargetAtTime(1300 + 5200 * f * f, ctx.currentTime, 0.1); },
-    gun(x) { if (!ready()) return;
-      tone({ x, f0: 150, f1: 42, dur: 0.22, gain: 0.5 }); noise({ x, f0: 1400, f1: 180, dur: 0.3, gain: 0.4 }); noise({ x, at: 0.03, f0: 500, f1: 90, dur: 0.9, gain: 0.12 }); },
-    splash(x) { if (!ready()) return;
-      noise({ x, type: 'bandpass', q: 0.8, f0: 2600, f1: 500, dur: 0.75, gain: 0.34, attack: 0.03 }); tone({ x, f0: 210, f1: 70, dur: 0.22, gain: 0.16 }); },
-    hit(x) { if (!ready()) return;
-      tone({ x, f0: 110, f1: 30, dur: 0.7, gain: 0.75 }); noise({ x, f0: 2400, f1: 110, dur: 0.9, gain: 0.6 });
-      tone({ x, wave: 'triangle', f0: 620, f1: 190, dur: 0.16, gain: 0.12 }); },
-    boom(x, at) { if (!ready()) return;
-      tone({ x, at, f0: 85, f1: 24, dur: 1.5, gain: 0.95 }); noise({ x, at, f0: 1800, f1: 70, dur: 1.9, gain: 0.8 }); },
-    sink(x) { if (!ready()) return;
-      noise({ x, at: 0.4, type: 'bandpass', q: 0.6, f0: 900, f1: 260, dur: 3.6, gain: 0.26, attack: 0.5 });      // water rushing in
-      tone({ x, at: 0.3, wave: 'sawtooth', f0: 74, f1: 38, dur: 2.6, gain: 0.1, attack: 0.4 });                  // hull groan
-      tone({ x, at: 0.9, wave: 'sawtooth', f0: 97, f1: 51, dur: 1.8, gain: 0.06, attack: 0.3 }); },
+    view(f, s) { focus = f; slow = 0.6 + 0.4 * s; if (ctx && ctx.state === 'running') damp.frequency.setTargetAtTime(2400 + 9000 * f * f, ctx.currentTime, 0.08); },
+    /* test hook: render each effect offline and return the samples */
+    async render(seq, seconds) {
+      seq = seq || [['gun', 0], ['hit', 5], ['boom', 10], ['splash', 15]]; seconds = seconds || 20;
+      const sr = 44100, off = new OfflineAudioContext(1, sr * seconds, sr), keep = ctx;
+      graph(off); master.gain.value = 0.85; for (const [n, t] of seq) { base = t; S[n](0); } base = 0;
+      const buf = await off.startRendering(); ctx = keep; return Array.from(buf.getChannelData(0));
+    },
   };
+  for (const name of Object.keys(S)) api[name] = function () { if (ready()) S[name].apply(null, arguments); };
+  return api;
 })();
 
 /* ---------- match state ---------- */
 const world = new THREE.Group(); scene.add(world);
 let R = null, ships = { A: [], B: [] }, cellShip = { A: {}, B: {} }, events = [], evIndex = 0, tweens = [], emitters = [];
 let clock = 0, speed = 1, paused = false, loop = true, endAt = 0, shake = 0;
-let cine = null, cineShip = null, cineStart = 0, focusW = 0, timeScale = 1;
+let cine = null, cineShip = null, cineStyle = 'ship', cineStart = 0, focusW = 0, timeScale = 1, lastShell = null;
+let planes = [], hero = null, heroSide = 1, wrecks = [], debris = [];
+let aiOn = true, hasHeat = false; const heat = {};
+const chase = { pos: new THREE.Vector3(), look: new THREE.Vector3(), set: false };
 let rows = 10, cols = 10;
 
 function cellPos(player, r, c) {
@@ -389,6 +529,65 @@ const smooth = k => k * k * (3 - 2 * k);
 function addTween(start, dur, update, done) { tweens.push({ start, dur, update, done }); }
 function at(t, fn) { events.push({ t, fn }); }
 
+/* ---------- fleet approach ----------
+   Each ship cruises in formation through the opening, then follows one curve onto its station, arriving already
+   pointing along its final heading. Paths are pure functions of time, so before the match starts the planner
+   simulates the whole approach and keeps trying variations until no two ships of a fleet pass through each other. */
+function approachAt(pa, t) {
+  if (t <= pa.delay) return [pa.x0 + (pa.sx - pa.x0) * (t / pa.delay), pa.sz, pa.startRot];
+  const k = (t - pa.delay) / pa.dur; if (k >= 1) return [pa.fx, pa.fz, pa.endRot];
+  const warp = q => pa.a0 * q + (3 - 2 * pa.a0) * q * q + (pa.a0 - 2) * q * q * q;       // leaves at cruising speed, eases to a stop
+  const a = hermite(pa.P0, pa.V0, pa.P1, pa.V1, pa.dur, warp(k)), b = hermite(pa.P0, pa.V0, pa.P1, pa.V1, pa.dur, warp(Math.min(1, k + 0.01)));
+  const moved = Math.hypot(b[0] - a[0], b[2] - a[2]);
+  return [a[0], a[2], moved > 1e-4 ? Math.atan2(-(b[2] - a[2]), b[0] - a[0]) : pa.endRot];
+}
+function planApproach(P, list) {
+  const dir = P === 'A' ? 1 : -1, n = list.length, mid = (n - 1) / 2, centre = -dir * (cols / 2 + GAP / 2), startRot = P === 'A' ? 0 : Math.PI;
+  const station = list.map((sp, i) => { const a = sp.cells[0], b = sp.cells[sp.cells.length - 1], p0 = cellPos(P, a[0], a[1]), p1 = cellPos(P, b[0], b[1]);
+    return { i, length: sp.length, fx: (p0.x + p1.x) / 2, fz: (p0.z + p1.z) / 2, horizontal: a[0] === b[0] }; });
+  const baseOrder = station.slice().sort((a, b) => a.fz - b.fz).map(st => st.i);       // start each ship on the side of the fleet it ends on
+  function make(order, opt) {
+    const out = [];
+    order.forEach((i, j) => {
+      const st = station[i], o = opt[i], sz = (j - mid) * 3.4, sx = centre - dir * (24 + Math.abs(j - mid) * 3);
+      const endRot = st.horizontal ? startRot : ((st.fz >= sz) !== o.flip ? -Math.PI / 2 : Math.PI / 2);
+      const delay = Math.max(0.2, OPENER - 1.2) + i * 0.3 + o.late, dur = INTRO - 1.6 - delay, D = Math.hypot(st.fx - sx, st.fz - sz), m = D * 0.6 / dur, m1 = D * 1.25 * o.swing / dur;
+      out[i] = { fx: st.fx, fz: st.fz, sx, sz, x0: sx - dir * CRUISE * delay, startRot, endRot, delay, dur, a0: Math.min(1.2, CRUISE / m), length: st.length,
+        P0: [sx, 0, sz], V0: [dir * m, 0, 0], P1: [st.fx, 0, st.fz], V1: [Math.cos(endRot) * m1, 0, -Math.sin(endRot) * m1] };
+    });
+    return out;
+  }
+  /* score a plan: any overlap between two hulls is disqualifying; among clean plans prefer the gentlest turns */
+  function score(pl) {
+    let count = 0, turn = 0, prev = null;
+    for (let t = 0; t <= INTRO; t += 0.12) {
+      const rots = pl.map(pa => approachAt(pa, t)[2]);
+      if (prev) rots.forEach((r, i) => { const d = Math.abs(Math.atan2(Math.sin(r - prev[i]), Math.cos(r - prev[i]))) / 0.12; if (d > turn) turn = d; });
+      prev = rots;
+      const now = pl.map(pa => { const q = approachAt(pa, t), h = pa.length / 2 - 0.3, cx = Math.cos(q[2]), cz = -Math.sin(q[2]);
+        return { pts: [-h, -h / 2, 0, h / 2, h].map(u => [q[0] + cx * u, q[1] + cz * u]), parked: Math.hypot(q[0] - pa.fx, q[1] - pa.fz) < 0.6 }; });
+      for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) {
+        if (now[a].parked && now[b].parked) continue;                                  // ships may legitimately sit side by side on the board
+        let near = false;
+        for (const u of now[a].pts) for (const v of now[b].pts) if (Math.hypot(u[0] - v[0], u[1] - v[1]) < 1.0) near = true;
+        if (near) count++;
+      }
+    }
+    return count * 1000 + turn;
+  }
+  const plain = () => station.map(() => ({ late: 0, swing: 1, flip: false }));
+  let best = make(baseOrder, plain()), bestCount = score(best);
+  for (let attempt = 0; attempt < 260; attempt++) {
+    const opt = plain(), order = baseOrder.slice();
+    for (const o of opt) { if (rnd() < 0.35) o.late = rr(0, 2.0); if (rnd() < 0.7) o.swing = rr(0.5, 2.2); o.flip = rnd() < 0.25; }
+    if (rnd() < 0.4 && n > 1) { const j = Math.floor(rnd() * (n - 1)); [order[j], order[j + 1]] = [order[j + 1], order[j]]; }
+    const pl = make(order, opt), c = score(pl);
+    if (c < bestCount) { best = pl; bestCount = c; }
+  }
+  (window.__clashes = window.__clashes || {})[P] = Math.floor(bestCount / 1000);
+  return best;
+}
+
 function buildBoard(player) {
   const t = TEAM[player], x0 = player === 'A' ? -(cols + GAP / 2) : GAP / 2, z0 = -rows / 2, pts = [];
   for (let i = 0; i <= cols; i++) pts.push(x0 + i, 0, z0, x0 + i, 0, z0 + rows);
@@ -398,40 +597,76 @@ function buildBoard(player) {
   const plane = new THREE.Mesh(new THREE.PlaneGeometry(cols, rows), new THREE.MeshBasicMaterial({ color: t.accent, transparent: true, opacity: 0, depthWrite: false }));
   plane.rotation.x = -Math.PI / 2; plane.position.set(x0 + cols / 2, 0.16, 0); world.add(plane);
   addTween(INTRO - 2.2, 1.8, k => { lines.material.opacity = 0.42 * k; plane.material.opacity = 0.07 * k; });
+  /* AI view: one texel per cell, repainted with the attacking bot's heatmap each time it shoots at this board */
+  const cv = document.createElement('canvas'); cv.width = cols; cv.height = rows;
+  const tex = new THREE.CanvasTexture(cv); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter;
+  const layer = new THREE.Mesh(new THREE.PlaneGeometry(cols, rows), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+  layer.rotation.x = -Math.PI / 2; layer.position.set(x0 + cols / 2, 0.165, 0); layer.visible = false; world.add(layer);
+  heat[player] = { g: cv.getContext('2d'), tex, layer };
+}
+/* paint what the shooting bot believed just before this shot, and mark the cell it picked */
+function think(target, shooterTeam, s) {
+  const h = heat[target]; if (!h || !s.heat) return;
+  const c = new THREE.Color(TEAM[shooterTeam].accent), g = h.g;
+  g.clearRect(0, 0, cols, rows);
+  for (let r = 0; r < rows; r++) for (let q = 0; q < cols; q++) {
+    const v = (s.heat.charCodeAt(r * cols + q) - 48) / 9; if (!(v > 0)) continue;
+    const w = v * v * v * 0.55, R8 = Math.round((c.r + (1 - c.r) * w) * 255), G8 = Math.round((c.g + (1 - c.g) * w) * 255), B8 = Math.round((c.b + (1 - c.b) * w) * 255);
+    g.fillStyle = `rgba(${R8},${G8},${B8},${(0.03 + 0.62 * v * v).toFixed(3)})`; g.fillRect(q, r, 1, 1);
+  }
+  h.tex.needsUpdate = true; h.layer.visible = aiOn;
+  if (!aiOn) return;
+  const to = cellPos(target, s.row, s.col), pts = [-0.5, 0, -0.5, 0.5, 0, -0.5, 0.5, 0, 0.5, -0.5, 0, 0.5];
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  const lock = new THREE.LineLoop(geo, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0 })); lock.position.set(to.x, 0.21, to.z); world.add(lock);
+  addTween(clock, FLIGHT + 0.15, k => { const sc = 1 + 1.3 * (1 - ease(Math.min(1, k * 2.2))); lock.scale.set(sc, 1, sc); lock.material.opacity = k < 0.8 ? Math.min(1, k * 5) : (1 - k) * 5; }, () => world.remove(lock));
+}
+function setAiView(on) {
+  aiOn = on; for (const P of ['A', 'B']) if (heat[P]) heat[P].layer.visible = on && hasHeat && clock >= INTRO;
+  $('aiview').textContent = on ? 'AI view on' : 'AI view off'; $('aiview').style.display = hasHeat ? '' : 'none';
+  $('ai').classList.toggle('off', !(on && hasHeat));
 }
 
 function build(replay) {
   R = replay; rows = R.rules.rows; cols = R.rules.cols; seed = (R.seed || 1) * 7919 + 13;
   while (world.children.length) world.remove(world.children[0]);
-  clearPools(); events = []; evIndex = 0; tweens = []; emitters = []; clock = 0; shake = 0; flash.intensity = 0; cine = null; cineShip = null;
+  clearPools(); events = []; evIndex = 0; tweens = []; emitters = []; clock = 0; shake = 0; flash.intensity = 0; cine = null; cineShip = null; lastShell = null; chase.set = false; planes = []; wrecks = []; debris = [];
   ships = { A: [], B: [] }; cellShip = { A: {}, B: {} };
+  hasHeat = R.shots.some(sh => sh.heat);
+  const src = R.heat_source || {}, own = ['A', 'B'].filter(P => src[P] === 'bot');
+  const label = document.createElement('b'); label.textContent = 'AI view';
+  $('ai').replaceChildren(label, ' · brighter = where the bot expects a ship · ' + (own.length === 2 ? "each bot's own scores" : own.length === 1 ? `${R.players[own[0]].name}'s own scores, the other estimated` : 'estimated from what each bot has seen'));
 
   for (const P of ['A', 'B']) {
     buildBoard(P);
     const list = R.placements[P] || [], lengths = list.map(s => s.length), dir = P === 'A' ? 1 : -1;
     $('name' + P).textContent = R.players[P].name;
     const pips = $('pips' + P); pips.innerHTML = '';
+    /* approach: a spread-out V formation, each ship on one continuous curve to its station (see planApproach) */
+    const plan = planApproach(P, list);
     list.forEach((sp, i) => {
-      const type = shipType(sp.length, i, lengths), mesh = buildShip(type, sp.length, P);
-      const first = sp.cells[0], last = sp.cells[sp.cells.length - 1];
-      const p0 = cellPos(P, first[0], first[1]), p1 = cellPos(P, last[0], last[1]);
-      const fx = (p0.x + p1.x) / 2, fz = (p0.z + p1.z) / 2, horizontal = first[0] === last[0];
-      const startRot = P === 'A' ? 0 : Math.PI, endRot = horizontal ? startRot : startRot + (i % 2 ? 1 : -1) * Math.PI / 2;
-      const sx = fx - dir * (34 + i * 5), delay = 0.4 + i * 0.35, dur = INTRO - 1.6 - delay;
-      const ship = { slot: sp.slot, type, mesh, turrets: mesh.userData.turrets, shotsFired: 0, x: sx, z: fz, rot: startRot, sunk: false, sinking: 0, moving: true, team: P, length: sp.length, dir };
-      mesh.position.set(sx, 0, fz); mesh.rotation.y = startRot; world.add(mesh);
-      addTween(delay, dur, k => { const e = ease(k); ship.x = sx + (fx - sx) * e; ship.rot = startRot + (endRot - startRot) * smooth(Math.max(0, (k - 0.6) / 0.4)); ship.speed = 1 - k; },
-        () => { ship.moving = false; });
+      const type = shipType(sp.length, i, lengths), mesh = finish(buildShip(type, sp.length, P), mats(P)), pa = plan[i], start = approachAt(pa, 0);
+      const ship = { slot: sp.slot, type, mesh, turrets: mesh.userData.turrets, shotsFired: 0, x: start[0], z: start[1], rot: start[2], speed: 0.6, sunk: false, sinking: 0,
+        moving: true, team: P, length: sp.length, dir, fx: pa.fx, fz: pa.fz, endRot: pa.endRot, x0: pa.x0, hits: 0, lean: (i % 2 ? 1 : -1) };
+      mesh.position.set(ship.x, 0, ship.z); mesh.rotation.y = ship.rot; world.add(mesh);
+      addTween(0, pa.delay + pa.dur, k => { const q = approachAt(pa, k * (pa.delay + pa.dur)); ship.x = q[0]; ship.z = q[1]; ship.rot = q[2]; ship.speed = 1 - Math.max(0, (k * (pa.delay + pa.dur) - pa.delay) / pa.dur); },
+        () => { ship.moving = false; ship.x = pa.fx; ship.z = pa.fz; ship.rot = pa.endRot; });
+      if (type === 'carrier') makePlanes(ship);
       ships[P].push(ship); for (const c of sp.cells) cellShip[P][c[0] + ',' + c[1]] = ship;
       const pip = document.createElement('div'); pip.className = 'pip'; pip.style.width = `clamp(${sp.length * 5}px, ${sp.length * 1.3}vmin, ${sp.length * 12}px)`; pips.appendChild(pip); ship.pip = pip;
     });
   }
 
+  /* the opening shot follows the first fleet's biggest gunship, from whichever side has open water */
+  hero = ships.A.find(v => v.type === 'battleship') || ships.A.find(v => v.type !== 'carrier') || ships.A[0] || null;
+  if (hero) { const gap = side => Math.min(...ships.A.filter(v => v !== hero).map(v => Math.abs(v.z - (hero.z + side * 3))), 99); heroSide = gap(1) >= gap(-1) ? 1 : -1; }
+
   /* title card */
   $('kicker').textContent = 'Battleship AI Hackathon';
   $('title').innerHTML = `<span class="va"></span><br>vs<br><span class="vb"></span>`;
   $('title').children[0].textContent = R.players.A.name; $('title').children[2].textContent = R.players.B.name;
-  $('sub').textContent = 'Two bots. One ocean.'; $('card').classList.add('on');
+  $('sub').textContent = 'Two bots. One ocean.'; $('card').classList.toggle('on', OPENER <= 0);
+  if (OPENER > 0) { at(OPENER - 1, () => $('card').classList.add('on')); at(0.9, () => sfx.horn(hero ? hero.x : 0)); }
   at(INTRO - 2.6, () => $('card').classList.remove('on'));
   $('count').textContent = ''; $('feed').textContent = '';
 
@@ -439,18 +674,28 @@ function build(replay) {
   const gapOf = s => s.outcome === 'miss' ? 0.42 : s.outcome === 'hit' ? 0.8 : 1.9;
   const raw = R.shots.reduce((sum, s) => sum + gapOf(s), 0), scale = Math.min(1.6, Math.max(0.45, TARGET_BATTLE / Math.max(raw, 1)));
   const alive = { A: ships.A.slice(), B: ships.B.slice() }, turnOf = { A: 0, B: 0 };
-  let t = INTRO, lastCine = -99; const cineTimes = window.__cine = [];
+  let t = INTRO, lastCine = -99, cineCount = 0; const cineTimes = window.__cine = [];
   R.shots.forEach((s, i) => {
     const shooterTeam = s.player, target = shooterTeam === 'A' ? 'B' : 'A';
     const pool = alive[shooterTeam], shooter = pool.length ? pool[turnOf[shooterTeam]++ % pool.length] : null;
     const victim = s.sunk ? ships[target].find(v => v.slot === s.sunk.slot) : null;
     if (victim) alive[target] = alive[target].filter(v => v !== victim);
-    const launch = t, final = i === R.shots.length - 1;
-    if (victim && (final || (rnd() < CINE_CHANCE && launch - lastCine > 6))) {
-      lastCine = launch; cineTimes.push(launch);
-      at(launch - 0.25, () => { cine = { end: launch + FLIGHT + (final ? 1.7 : 0.8) }; cineShip = victim; cineStart = wall; });
+    const launch = t, impact = launch + FLIGHT, final = i === R.shots.length - 1;
+    /* a carrier attacks with one of its aircraft when one is free; otherwise it fires like any other ship */
+    const plane = shooter && shooter.type === 'carrier' ? planes.find(pl => pl.ship === shooter && pl.busyUntil <= launch - 1.0) : null;
+    if (victim && (final || (rnd() < CINE_CHANCE && launch - lastCine > 5))) {
+      /* two kinds of close-up: ride behind the shell, or cut to the ship just before it is hit */
+      const style = plane ? 'ship' : (cineCount++ % 2 === 0 ? 'shell' : 'ship');
+      const camFrom = style === 'shell' ? launch + 0.02 : impact - 0.5, slowFrom = style === 'shell' ? launch + 0.12 : impact - 0.1;
+      lastCine = launch; cineTimes.push({ launch, style });
+      at(camFrom, () => {
+        cine = { slowFrom, end: impact + (final ? 1.0 : 0.45) }; cineShip = victim; cineStyle = style; cineStart = wall; chase.set = false;
+        if (style === 'shell' && !(lastShell && lastShell.launch === launch)) cineStyle = 'ship';
+      });
     }
-    at(launch, () => fire(shooter, shooterTeam, target, s, i, launch, victim));
+    if (plane) scheduleAttack(plane, shooterTeam, target, s, i, launch, victim);
+    else at(launch, () => fire(shooter, shooterTeam, target, s, i, launch, victim));
+    if (victim && victim.type === 'carrier') for (const pl of planes) if (pl.ship === victim) scheduleDeparture(pl, impact + 0.6);
     t += gapOf(s) * scale;
   });
   endAt = t + FLIGHT + 2.6;
@@ -461,18 +706,19 @@ function build(replay) {
     $('sub').textContent = `${R.turns} shots fired`; $('card').classList.add('on');
   });
   events.sort((a, b) => a.t - b.t);
-  $('msg').style.display = 'none';
+  $('msg').style.display = 'none'; setAiView(aiOn);
 }
 
 /* ---------- effects ---------- */
 function fire(shooter, shooterTeam, target, s, i, launch, victim) {
+  think(target, shooterTeam, s);
   const to = cellPos(target, s.row, s.col);
   const from = shooter ? { x: shooter.x, z: shooter.z } : { x: (shooterTeam === 'A' ? -1 : 1) * (cols / 2 + GAP), z: 0 };
   if (shooter && shooter.turrets.length) {
     /* every turret swings onto the target; the shell leaves from one of them */
     const yaw = Math.atan2(-(to.z - shooter.z), to.x - shooter.x);
     for (const tr of shooter.turrets) tr.userData.aim = yaw - shooter.rot;
-    const tr = shooter.turrets[shooter.shotsFired++ % shooter.turrets.length];
+    const tr = shooter.turrets[shooter.shotsFired++ % shooter.turrets.length]; tr.userData.kick = 1;
     from.x += Math.cos(shooter.rot) * tr.userData.x; from.z -= Math.sin(shooter.rot) * tr.userData.x;
   }
   const dx = to.x - from.x, dz = to.z - from.z, dist = Math.hypot(dx, dz), apex = 1.6 + dist * 0.22;
@@ -484,17 +730,87 @@ function fire(shooter, shooterTeam, target, s, i, launch, victim) {
     const x = from.x + dx * k, z = from.z + dz * k, y = 0.6 + (0.2 - 0.6) * k + apex * 4 * k * (1 - k);
     shell.position.set(x, y, z);
     spawn(glow, { x, y, z, life: 0.22, s0: 0.28, s1: 0.05, a: 0.8, color: TEAM[shooterTeam].accent });
-  }, () => {
-    world.remove(shell);
-    $('count').textContent = `Shot ${i + 1} / ${R.shots.length}`;
-    const who = R.players[shooterTeam].name, cell = cellName(s.row, s.col);
-    if (s.outcome === 'miss') { splash(to.x, to.z); sfx.splash(to.x); $('feed').textContent = `${who} · ${cell} · miss`; $('feed').style.color = ''; }
-    else {
-      explode(to.x, to.z, false); sfx.hit(to.x); scorch(cellShip[target][s.row + ',' + s.col], to); emitters.push({ x: to.x, z: to.z, team: target, row: s.row, col: s.col, acc: 0, on: true });
-      $('feed').textContent = `${who} · ${cell} · HIT`; $('feed').style.color = '#ffd27a';
-      if (victim) sink(victim, s.sunk.cells, target, who);
-    }
+  }, () => { world.remove(shell); land(to, shooterTeam, target, s, i, victim); });
+  lastShell = { mesh: shell, launch, dx: dx / dist, dz: dz / dist };
+}
+function land(to, shooterTeam, target, s, i, victim) {
+  $('count').textContent = `Shot ${i + 1} / ${R.shots.length}`;
+  const who = R.players[shooterTeam].name, cell = cellName(s.row, s.col);
+  if (s.outcome === 'miss') { splash(to.x, to.z); sfx.splash(to.x); $('feed').textContent = `${who} · ${cell} · miss`; $('feed').style.color = ''; }
+  else {
+    explode(to.x, to.z, false); sfx.hit(to.x); const struck = cellShip[target][s.row + ',' + s.col]; if (struck) struck.hits++; scorch(struck, to); emitters.push({ x: to.x, z: to.z, team: target, row: s.row, col: s.col, acc: 0, on: true });
+    $('feed').textContent = `${who} · ${cell} · HIT`; $('feed').style.color = '#ffd27a';
+    if (victim) sink(victim, s.sunk.cells, target, who);
+  }
+}
+
+/* ---------- carrier aircraft ----------
+   Every aircraft position is a pure function of the match clock: a holding circle over its own fleet,
+   with take-off, attack runs and departure spliced in as timed curves. */
+const TAKEOFF = 2.4, RUN_IN = 1.3, PULL_OUT = 1.7, BOMB_FALL = FLIGHT - 0.3;
+function hermite(p0, v0, p1, v1, T, k) {
+  const k2 = k * k, k3 = k2 * k, a = 2 * k3 - 3 * k2 + 1, b = (k3 - 2 * k2 + k) * T, c = -2 * k3 + 3 * k2, d = (k3 - k2) * T;
+  return [a * p0[0] + b * v0[0] + c * p1[0] + d * v1[0], a * p0[1] + b * v0[1] + c * p1[1] + d * v1[1], a * p0[2] + b * v0[2] + c * p1[2] + d * v1[2]];
+}
+function holdAt(pl, t) {
+  const o = pl.orbit, a = o.ph + o.w * t;
+  return [o.cx + o.r * Math.cos(a), o.alt + 0.35 * Math.sin(t * 0.7 + o.ph), o.cz + o.r * Math.sin(a)];
+}
+function holdVel(pl, t) { const a = holdAt(pl, t), b = holdAt(pl, t + 0.02); return [(b[0] - a[0]) / 0.02, (b[1] - a[1]) / 0.02, (b[2] - a[2]) / 0.02]; }
+function planeAt(pl, t) {
+  for (const sg of pl.segs) if (t >= sg.t0 && t < sg.t1) return hermite(sg.p0, sg.v0, sg.p1, sg.v1, sg.t1 - sg.t0, (t - sg.t0) / (sg.t1 - sg.t0));
+  return holdAt(pl, t);
+}
+function makePlanes(ship) {
+  const m = mats(ship.team), sign = ship.team === 'A' ? 1 : -1, cx = -sign * (cols / 2 + GAP / 2);
+  const hx = Math.cos(ship.endRot), hz = -Math.sin(ship.endRot);
+  for (let i = 0; i < PLANES; i++) {
+    const outer = new THREE.Group(), inner = planeModel(m); inner.rotation.y = -Math.PI / 2; outer.add(inner); world.add(outer);
+    const lx = 1.4 - i * 0.5, lz = 0.12 + (i % 2) * 0.12, tTake = INTRO - 1.3 + i * 0.5;
+    const pl = { mesh: outer, ship, lx, lz, tTake, segs: [], busyUntil: tTake + TAKEOFF, gone: Infinity,
+      orbit: { cx, cz: 0, r: 5.2 + i * 0.9, alt: 4.2 + i * 0.6, w: sign * 0.6, ph: i * 2.1 } };
+    const p0 = [ship.fx + hx * lx - hz * lz, 0.42, ship.fz + hz * lx + hx * lz];
+    pl.segs.push({ t0: tTake, t1: tTake + TAKEOFF, p0, v0: [hx * 3.5, 0, hz * 3.5], p1: holdAt(pl, tTake + TAKEOFF), v1: holdVel(pl, tTake + TAKEOFF) });
+    planes.push(pl);
+  }
+}
+function scheduleAttack(pl, shooterTeam, target, s, i, launch, victim) {
+  const to = cellPos(target, s.row, s.col), ta = launch + 0.3 - RUN_IN, tr = launch + 0.3, te = tr + PULL_OUT;
+  const p0 = holdAt(pl, ta), dx = to.x - p0[0], dz = to.z - p0[2], dl = Math.hypot(dx, dz) || 1, ux = dx / dl, uz = dz / dl, v = 9;
+  const pr = [to.x - ux * v * BOMB_FALL, 1.7, to.z - uz * v * BOMB_FALL], vr = [ux * v, -0.8, uz * v];
+  pl.segs.push({ t0: ta, t1: tr, p0, v0: holdVel(pl, ta), p1: pr, v1: vr });
+  pl.segs.push({ t0: tr, t1: te, p0: pr, v0: vr, p1: holdAt(pl, te), v1: holdVel(pl, te) });
+  pl.busyUntil = te;
+  at(ta + 0.2, () => sfx.dive(p0[0])); at(launch, () => think(target, shooterTeam, s));
+  at(tr, () => {
+    const bomb = new THREE.Mesh(new THREE.SphereGeometry(0.08, 6, 5), new THREE.MeshBasicMaterial({ color: 0x20262e })); world.add(bomb); sfx.whistle(to.x);
+    addTween(tr, BOMB_FALL, k => {
+      bomb.position.set(pr[0] + (to.x - pr[0]) * k, 0.15 + 1.55 * (1 - k * k), pr[2] + (to.z - pr[2]) * k);
+      spawn(puff, { x: bomb.position.x, y: bomb.position.y, z: bomb.position.z, life: 0.25, s0: 0.14, s1: 0.04, a: 0.5, color: 0xdfe6ee });
+    }, () => { world.remove(bomb); land(to, shooterTeam, target, s, i, victim); });
   });
+}
+function scheduleDeparture(pl, t) {
+  /* the carrier is gone: its aircraft leave for the horizon */
+  const t0 = Math.max(t, pl.busyUntil), sign = pl.orbit.w > 0 ? -1 : 1;
+  pl.segs.push({ t0, t1: t0 + 7, p0: holdAt(pl, t0), v0: holdVel(pl, t0), p1: [pl.orbit.cx + sign * 70, 16, -45], v1: [sign * 12, 1, -7] });
+  pl.busyUntil = Infinity; pl.gone = t0 + 7;
+}
+function stepPlanes() {
+  for (const pl of planes) {
+    const m = pl.mesh, sh = pl.ship;
+    if (clock >= pl.gone) { m.visible = false; continue; }
+    if (clock < pl.tTake) {
+      const hx = Math.cos(sh.rot), hz = -Math.sin(sh.rot);
+      m.position.set(sh.x + hx * pl.lx - hz * pl.lz, sh.mesh.position.y + 0.4, sh.z + hz * pl.lx + hx * pl.lz); m.rotation.set(0, sh.rot + Math.PI / 2, 0); m.scale.setScalar(1);
+      continue;
+    }
+    const p = planeAt(pl, clock), q = planeAt(pl, clock + 0.05), r = planeAt(pl, clock + 0.25);
+    m.position.set(p[0], p[1], p[2]); m.lookAt(q[0], q[1], q[2]);
+    let turn = Math.atan2(r[2] - q[2], r[0] - q[0]) - Math.atan2(q[2] - p[2], q[0] - p[0]); turn = Math.atan2(Math.sin(turn), Math.cos(turn));
+    m.rotateZ(Math.max(-1, Math.min(1, turn * 3)));
+    m.scale.setScalar(1 + 1.6 * smooth(Math.min(1, (clock - pl.tTake) / 2)));
+  }
 }
 function scorch(ship, to) {
   if (!ship) return;
@@ -510,24 +826,48 @@ function splash(x, z) {
   const peg = new THREE.Mesh(new THREE.RingGeometry(0.13, 0.2, 16), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }));
   peg.rotation.x = -Math.PI / 2; peg.position.set(x, 0.18, z); world.add(peg);
 }
-function explode(x, z, big) {
+function explode(x, z, big, quiet) {
   const n = big ? 34 : 16, v = big ? 5.5 : 3.2;
   for (let k = 0; k < n; k++) spawn(glow, { x, y: 0.5, z, vx: rr(-v, v) * 0.6, vy: rr(1, v), vz: rr(-v, v) * 0.6, g: -5, life: rr(0.3, big ? 0.9 : 0.6), s0: big ? 1.3 : 0.8, s1: 0.2, color: rnd() < 0.5 ? 0xffa030 : 0xff5a1e });
   for (let k = 0; k < (big ? 14 : 6); k++) spawn(puff, { x: x + rr(-0.3, 0.3), y: 0.6, z: z + rr(-0.3, 0.3), vx: rr(-0.8, 0.8), vy: rr(1, 2.6), vz: rr(-0.8, 0.8), life: rr(1.2, 2.4), s0: 0.6, s1: big ? 3 : 1.9, a: 0.55, color: 0x2a2623 });
   flash.position.set(x, 2, z); flash.intensity = big ? 5 : 2.6; shake = Math.max(shake, big ? 0.45 : 0.12);
+  /* shock ring racing out across the water, and sparks thrown high */
+  if (!quiet) {
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.94, 1, 32), new THREE.MeshBasicMaterial({ color: 0xffe2b8, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.DoubleSide }));
+    ring.rotation.x = -Math.PI / 2; ring.position.set(x, 0.2, z); world.add(ring);
+    addTween(clock, big ? 0.7 : 0.45, k => { const sc = 0.2 + (big ? 3.2 : 1.7) * ease(k); ring.scale.set(sc, sc, sc); ring.material.opacity = 0.4 * (1 - k); }, () => world.remove(ring));
+  }
+  for (let k = 0; k < (big ? 10 : 4); k++) spawn(glow, { x, y: 0.6, z, vx: rr(-2.2, 2.2), vy: rr(3, 7), vz: rr(-2.2, 2.2), g: -9, life: rr(0.7, 1.3), s0: 0.12, s1: 0.04, color: 0xffd070 });
 }
 function sink(ship, cells, team, who) {
   ship.sunk = true; ship.pip.classList.add('sunk');
   for (const e of emitters) if (e.team === team && cells.some(c => c[0] === e.row && c[1] === e.col)) e.on = false;
-  cells.forEach((c, idx) => { const p = cellPos(team, c[0], c[1]); at(clock + idx * 0.12, () => explode(p.x, p.z, idx % 2 === 0)); if (idx % 2 === 0) sfx.boom(p.x, idx * 0.12); });
+  cells.forEach((c, idx) => { const p = cellPos(team, c[0], c[1]); at(clock + idx * 0.12, () => explode(p.x, p.z, idx % 2 === 0, idx > 0)); if (idx % 2 === 0) sfx.boom(p.x, idx * 0.12); });
   sfx.sink(ship.x);
   events.sort((a, b) => a.t - b.t);
-  const name = SHIP_NAMES[ship.type] || 'ship', roll = (rnd() < 0.5 ? -1 : 1) * rr(0.45, 0.8), pitch = rr(-0.3, 0.3);
+  const name = SHIP_NAMES[ship.type] || 'ship', roll = (rnd() < 0.5 ? -1 : 1) * rr(0.5, 0.8), pitch = (rnd() < 0.5 ? -1 : 1) * rr(0.22, 0.4);
   $('feed').textContent = `${who} sinks the ${name}!`; $('feed').style.color = '#ff8a5c';
   addTween(clock + 0.3, 3.4, k => {
     ship.sinking = k; ship.roll = roll * smooth(Math.min(1, k * 1.6)); ship.pitch = pitch * k;
     if (rnd() < 0.5) spawn(puff, { x: ship.x + rr(-1, 1) * ship.length * 0.35, y: 0.2, z: ship.z + rr(-0.5, 0.5), vy: rr(0.6, 1.6), life: rr(0.6, 1.2), s0: 0.3, s1: 0.9, a: 0.7, color: 0xeaf6ff });
-  }, () => { ship.mesh.visible = false; });
+  }, () => wreck(ship));
+}
+/* a sunk ship does not vanish: the burnt-out hull settles awash, trailing smoke, an oil slick and floating debris */
+function wreck(ship) {
+  ship.wrecked = true;
+  const foam = mats(ship.team).foam;
+  ship.mesh.traverse(o => { if (!o.isMesh) return; if (o.material === foam) o.visible = false; else o.material = charred(o.material); });
+  wrecks.push({ ship, acc: 0, since: clock });
+  const slick = new THREE.Mesh(new THREE.CircleGeometry(1, 28), new THREE.MeshBasicMaterial({ color: 0x06090d, transparent: true, opacity: 0, depthWrite: false }));
+  slick.rotation.x = -Math.PI / 2; slick.position.set(ship.x, 0.15, ship.z); slick.scale.set(0.3, 0.3, 0.3); world.add(slick);
+  const r = 0.5 + ship.length * 0.3;
+  addTween(clock, 7, k => { const sc = 0.3 + (r - 0.3) * ease(k); slick.scale.set(sc * 1.25, sc, sc); slick.material.opacity = 0.2 * Math.min(1, k * 4); });
+  const m = mats(ship.team);
+  for (let k = 0; k < 5 + ship.length; k++) {
+    const bit = box(rr(0.08, 0.3), rr(0.03, 0.07), rr(0.06, 0.18), charred(rnd() < 0.3 ? m.accent : m.hull), 0, 0, 0); bit.rotation.y = rr(0, 6.28); world.add(bit);
+    const a = rr(0, 6.28), d = rr(0.2, 0.6);
+    debris.push({ mesh: bit, x: ship.x + rr(-1, 1) * ship.length * 0.4, z: ship.z + rr(-0.4, 0.4), vx: Math.cos(a) * d, vz: Math.sin(a) * d, ph: rr(0, 6.28) });
+  }
 }
 
 /* ---------- frame loop ---------- */
@@ -537,34 +877,59 @@ function layout() {
 window.addEventListener('resize', layout); layout();
 
 function placeCamera(t) {
-  const aspect = camera.aspect, pull = 1 + 0.75 * (1 - smooth(Math.min(1, clock / (INTRO - 0.5))));
+  const aspect = camera.aspect, pull = 1 + 0.75 * (1 - smooth(Math.max(0, Math.min(1, (clock - OPENER) / 6.5))));
   const sway = Math.sin(t * 0.13) * 0.06;
   let px, py, pz, tx = 0, tz = 0;
   if (aspect >= 1) { const f = Math.max(1, 1.55 / aspect) * pull; camera.fov = 40; px = Math.sin(sway) * 30 * f; py = 17.5 * f; pz = 20 * f * Math.cos(sway); tz = 0.6; }
   else { const f = Math.max(1, 0.56 / aspect) * pull; camera.fov = 46; px = -27 * f * Math.cos(sway); py = 21 * f; pz = Math.sin(sway) * 27 * f; tx = -0.5; }
-  camera.updateProjectionMatrix();
-  let ty = 0;
-  if (focusW > 0 && cineShip) {
-    /* blend from the aerial view to a low orbit around the ship that is about to sink */
-    const sh = cineShip, w = smooth(focusW), hfov = Math.atan(Math.tan(camera.fov * Math.PI / 360) * aspect);
-    const dist = Math.max(6, (sh.length + 2.2) / (2 * Math.tan(hfov)));
-    let dx = px - sh.x, dz = pz - sh.z; const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
-    const a = 0.45 + (t - cineStart) * 0.1, ca = Math.cos(a), sa = Math.sin(a);
-    const cx = sh.x + (dx * ca - dz * sa) * dist, cz = sh.z + (dx * sa + dz * ca) * dist, cy = dist * 0.36 + 0.9;
-    px += (cx - px) * w; py += (cy - py) * w; pz += (cz - pz) * w; tx += (sh.x - tx) * w; tz += (sh.z - tz) * w; ty = 0.35 * w;
+  let ty = 0, fovTo = camera.fov;
+  if (hero && clock < OPENER + 2) {
+    /* opening: (1) at the waterline looking up as the ship slides into frame, (2) swing out behind the fleet
+       to see the enemy closing from the horizon, (3) climb away into the aerial view */
+    const d = hero.dir, sd = heroSide, hx = hero.x, hz = hero.z, h0 = hero.x0;
+    const k0 = smooth(Math.min(1, clock / 3)), k1 = smooth(Math.max(0, Math.min(1, (clock - 3.0) / 3.0))), k2 = smooth(Math.max(0, Math.min(1, (clock - (OPENER - 1.2)) / 3.2)));
+    const ax = h0 + d * 6.2, ay = 0.3, az = hz + sd * 1.9, alx = hx + d * 1.6 * (1 - k0), aly = 0.8, alz = hz;
+    const bx = hx - d * 16, by = 2.6, bz = hz + sd * 1.6, blx = hx + d * 40, bly = 0.2, blz = hz * 0.3;
+    const ox = ax + (bx - ax) * k1, oy = ay + (by - ay) * k1 + Math.sin(k1 * Math.PI) * 2.0, oz = az + (bz - az) * k1;   // lifts over the ships astern as it drops back
+    const olx = alx + (blx - alx) * k1, oly = aly + (bly - aly) * k1, olz = alz + (blz - alz) * k1, w = 1 - k2;
+    px += (ox - px) * w; py += (oy - py) * w; pz += (oz - pz) * w; tx += (olx - tx) * w; tz += (olz - tz) * w; ty = oly * w;
+    fovTo += ((44 + (26 - 44) * k1) - fovTo) * w;   // wide at the waterline, long lens down the line of advance
   }
+  if (focusW > 0 && cineShip) {
+    const sh = cineShip, w = smooth(focusW);
+    let cx, cy, cz, lx = sh.x, ly = 0.35, lz = sh.z;
+    if (cineStyle === 'shell') {
+      /* ride just behind and above the shell, looking past it at the ship it is about to hit */
+      const ls = lastShell;
+      if (ls && ls.mesh.parent) {
+        const sp = ls.mesh.position;
+        chase.pos.set(sp.x - ls.dx * 3.0 - ls.dz * 0.6, Math.max(0.8, sp.y + 1.0), sp.z - ls.dz * 3.0 + ls.dx * 0.6);
+        chase.look.set(sp.x * 0.7 + sh.x * 0.3, sp.y * 0.7 + 0.1, sp.z * 0.7 + sh.z * 0.3); chase.set = true;
+      } else if (chase.set) { chase.look.x += (sh.x - chase.look.x) * 0.12; chase.look.y += (0.35 - chase.look.y) * 0.12; chase.look.z += (sh.z - chase.look.z) * 0.12; }
+      if (chase.set) { cx = chase.pos.x; cy = chase.pos.y; cz = chase.pos.z; lx = chase.look.x; ly = chase.look.y; lz = chase.look.z; }
+    }
+    if (cx === undefined) {
+      /* low orbit around the ship that is about to sink */
+      const hfov = Math.atan(Math.tan(camera.fov * Math.PI / 360) * aspect), dist = Math.max(6, (sh.length + 2.2) / (2 * Math.tan(hfov)));
+      let dx = px - sh.x, dz = pz - sh.z; const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
+      const a = 0.45 + (t - cineStart) * 0.1, ca = Math.cos(a), sa = Math.sin(a);
+      cx = sh.x + (dx * ca - dz * sa) * dist; cz = sh.z + (dx * sa + dz * ca) * dist; cy = dist * 0.36 + 0.9;
+    }
+    px += (cx - px) * w; py += (cy - py) * w; pz += (cz - pz) * w; tx += (lx - tx) * w; tz += (lz - tz) * w; ty += (ly - ty) * w;
+  }
+  camera.fov += (fovTo - camera.fov); camera.updateProjectionMatrix();
   camera.position.set(px + (Math.random() - 0.5) * shake, py + (Math.random() - 0.5) * shake, pz + (Math.random() - 0.5) * shake);
-  camera.lookAt(tx, ty, tz);
+  camera.lookAt(tx, ty, tz); skyDome.position.copy(camera.position);
 }
 
 let last = performance.now(), wall = 0, skipRender = false;
 function step(dt) {
   wall += dt; waterMat.uniforms.uT.value = wall;
   if (R && !paused) {
-    const active = !!cine && clock < cine.end; if (cine && !active) cine = null;
-    timeScale += ((active ? CINE_SLOW : 1) - timeScale) * Math.min(1, dt * 5);
-    focusW = Math.max(0, Math.min(1, focusW + (active ? 1 : -1) * dt / 0.85));
-    document.body.classList.toggle('cine', active); sfx.view(focusW, timeScale);
+    const active = !!cine && clock < cine.end, slowed = active && clock >= cine.slowFrom; if (cine && !active) cine = null;
+    timeScale += ((slowed ? CINE_SLOW : 1) - timeScale) * Math.min(1, dt * 12);
+    focusW = Math.max(0, Math.min(1, focusW + (active ? dt / 0.4 : -dt / 0.55)));
+    document.body.classList.toggle('cine', active); document.body.classList.toggle('opening', clock < OPENER - 1); sfx.view(focusW, timeScale);
     clock += dt * speed * timeScale;
     while (evIndex < events.length && events[evIndex].t <= clock) events[evIndex++].fn();
     for (let i = tweens.length - 1; i >= 0; i--) {
@@ -577,14 +942,21 @@ function step(dt) {
       if (!e.on) continue; e.acc += sdt;
       while (e.acc > 0.11) { e.acc -= 0.11;
         spawn(glow, { x: e.x + rr(-0.15, 0.15), y: 0.45, z: e.z + rr(-0.15, 0.15), vy: rr(0.8, 1.7), life: rr(0.35, 0.6), s0: 0.55, s1: 0.12, color: rnd() < 0.5 ? 0xff8a20 : 0xffc040 });
+        if (rnd() < 0.15) spawn(glow, { x: e.x, y: 0.6, z: e.z, vx: rr(0.2, 1), vy: rr(1.5, 3), vz: rr(-0.4, 0.4), life: rr(0.8, 1.5), s0: 0.09, s1: 0.03, color: 0xffb040 });
         if (rnd() < 0.4) spawn(puff, { x: e.x, y: 0.8, z: e.z, vx: rr(0.2, 0.6), vy: rr(0.9, 1.5), vz: rr(-0.2, 0.2), life: rr(1.2, 2), s0: 0.35, s1: 1.4, a: 0.4, color: 0x2a2623 });
       }
     }
     for (const P of ['A', 'B']) for (const s of ships[P]) {
-      if (!s.mesh.visible) continue;
-      const bob = waveH(s.x, s.z, wall) * 0.9, k = s.sinking;
-      s.mesh.position.set(s.x, bob - (s.type === 'submarine' ? 0.05 : 0) - k * k * 2.6, s.z);
-      s.mesh.rotation.set((s.roll || 0) + Math.sin(wall * 1.3 + s.x) * 0.03, s.rot, (s.pitch || 0) + Math.sin(wall * 1.1 + s.z) * 0.02);
+      const bob = waveH(s.x, s.z, wall) * 0.9, k = s.sinking, list = s.sunk ? 0 : s.lean * Math.min(0.14, s.hits * 0.04);   // damaged ships take on a list
+      s.mesh.position.set(s.x, bob * (1 - 0.6 * k) - (s.type === 'submarine' ? 0.05 : 0) - k * k * 0.36, s.z);
+      s.mesh.rotation.set((s.roll || 0) + list + Math.sin(wall * 1.3 + s.x) * 0.03 * (1 - k), s.rot, (s.pitch || 0) + Math.sin(wall * 1.1 + s.z) * 0.02 * (1 - k));
+      if (s.sunk) continue;
+      for (const r of s.mesh.userData.spin) r.rotation.y += sdt * 2.2;
+      for (const st of s.mesh.userData.stacks) if (rnd() < sdt * 5) {
+        const c = Math.cos(s.rot), sn = Math.sin(s.rot), lz = st[2] || 0;
+        spawn(puff, { x: s.x + c * st[0] + sn * lz, y: s.mesh.position.y + st[1], z: s.z - sn * st[0] + c * lz, vx: 0.35, vy: rr(0.5, 0.9), vz: rr(-0.1, 0.1), life: rr(1.1, 1.9), s0: 0.14, s1: 0.75, a: 0.26, color: 0x4a4e55 });
+      }
+      for (const tr of s.turrets) if (tr.userData.kick > 0.001) { tr.userData.kick *= Math.pow(0.004, sdt); for (const b of tr.userData.guns) b.position.x = b.userData.rest - 0.1 * tr.userData.kick; }
       for (const tr of s.turrets) {
         let d = tr.userData.aim - tr.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); tr.rotation.y += d * Math.min(1, sdt * 9);
       }
@@ -593,7 +965,19 @@ function step(dt) {
         spawn(puff, { x: bx + rr(-0.2, 0.2), y: 0.14, z: bz + rr(-0.3, 0.3), vx: -Math.cos(s.rot) * 0.4, life: rr(0.7, 1.3), s0: 0.35, s1: 1.1, a: 0.5 * Math.min(1, s.speed * 3), color: 0xf2fbff });
       }
     }
-    stepPool(glow, sdt); stepPool(puff, sdt);
+    for (const w of wrecks) {
+      const sh = w.ship, age = clock - w.since; w.acc += sdt;
+      while (w.acc > 0.28) { w.acc -= 0.28;
+        const ox = rr(-1, 1) * sh.length * 0.3, c = Math.cos(sh.rot), sn = Math.sin(sh.rot), x = sh.x + c * ox, z = sh.z - sn * ox;
+        spawn(puff, { x, y: 0.35, z, vx: rr(0.25, 0.6), vy: rr(0.7, 1.3), vz: rr(-0.15, 0.15), life: rr(2.2, 3.4), s0: 0.4, s1: 2.3, a: age < 12 ? 0.42 : 0.22, color: 0x1c1a19 });
+        if (age < 7) spawn(glow, { x, y: 0.3, z, vy: rr(0.6, 1.3), life: rr(0.35, 0.6), s0: 0.5 * (1 - age / 8), s1: 0.1, color: rnd() < 0.5 ? 0xff8a20 : 0xffc040 });
+      }
+    }
+    for (const d of debris) {
+      d.x += d.vx * sdt; d.z += d.vz * sdt; d.vx *= Math.pow(0.5, sdt); d.vz *= Math.pow(0.5, sdt);
+      d.mesh.position.set(d.x, waveH(d.x, d.z, wall) + 0.03, d.z); d.mesh.rotation.x = Math.sin(wall * 1.4 + d.ph) * 0.25; d.mesh.rotation.z = Math.cos(wall * 1.1 + d.ph) * 0.25;
+    }
+    stepPlanes(); stepPool(glow, sdt); stepPool(puff, sdt);
     flash.intensity *= Math.pow(0.002, sdt); shake *= Math.pow(0.01, sdt);
     if (loop && clock > endAt + 7) build(R);
   }
@@ -606,11 +990,12 @@ $('restart').onclick = () => { if (R) build(R); };
 $('pause').onclick = () => { paused = !paused; $('pause').textContent = paused ? 'Play' : 'Pause'; };
 const speeds = [1, 2, 4, 0.5];
 $('speed').onclick = () => { speed = speeds[(speeds.indexOf(speed) + 1) % speeds.length]; $('speed').textContent = `Speed ${speed}x`; };
+$('aiview').onclick = () => setAiView(!aiOn);
 $('loop').onclick = () => { loop = !loop; $('loop').textContent = loop ? 'Loop on' : 'Loop off'; };
 $('sound').onclick = () => { $('sound').textContent = sfx.toggle() ? 'Sound on' : 'Sound off'; };
 function toggleBar() { $('bar').classList.toggle('hide'); }
 $('hide').onclick = toggleBar;
-window.addEventListener('keydown', e => { if (e.key === 'h' || e.key === 'H') toggleBar(); if (e.key === 'm' || e.key === 'M') $('sound').click(); if (e.key === ' ') { e.preventDefault(); $('pause').click(); } });
+window.addEventListener('keydown', e => { if (e.key === 'h' || e.key === 'H') toggleBar(); if (e.key === 'm' || e.key === 'M') $('sound').click(); if (e.key === 'v' || e.key === 'V') $('aiview').click(); if (e.key === ' ') { e.preventDefault(); $('pause').click(); } });
 $('file').addEventListener('change', e => {
   const f = e.target.files[0]; if (!f) return;
   f.text().then(txt => { try { const data = JSON.parse(txt); if (!data.shots || !data.placements) throw new Error('not a replay'); build(data); }
@@ -618,7 +1003,7 @@ $('file').addEventListener('change', e => {
 });
 
 /* test hook: advance the replay by a fixed number of seconds */
-window.__clock = () => clock;
+window.__clock = () => clock; window.__ships = () => ships.A.concat(ships.B).map(v => [v.team, v.type, v.x, v.z, v.rot]); window.__sfx = sfx;
 window.__advance = (secs, draw) => { skipRender = !draw; for (let i = 0, n = Math.round(secs * 30); i < n; i++) step(1 / 30); skipRender = false; if (draw !== null) step(0); };
 
 if (window.REPLAY) build(window.REPLAY); else $('msg').style.display = 'block';
