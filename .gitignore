@@ -1,11 +1,39 @@
+# Python
 .deps/
 .venv/
+venv/
 __pycache__/
 .pytest_cache/
+.hypothesis/
 *.py[cod]
 *.egg-info/
+build/
+dist/
+
+# Tool caches (machine-specific, never commit)
+.pip-cache/
+.matplotlib-cache/
+
+# Match output
 *.log
 logs/*
 !logs/.gitkeep
 results/*
 !results/.gitkeep
+
+# Screen recordings and exports of the viewer
+recordings/
+*.mp4
+*.mov
+*.webm
+*.gif
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local secrets
+.env

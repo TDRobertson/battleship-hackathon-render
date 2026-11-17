@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Battleship AI Replay</title>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --a: #ff7a45; --b: #3fd0c9; --ink: #f3ede4; --dim: rgba(243,237,228,.55); --panel: rgba(8,16,30,.55); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1b3a; color: var(--ink);
+    font-family: "Chakra Petch", "Segoe UI", system-ui, sans-serif; }
+  canvas { display: block; width: 100%; height: 100%; }
+  .hud { position: fixed; left: 0; right: 0; pointer-events: none; }
+  #top { top: 0; padding: clamp(10px, 2.2vmin, 22px); display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .side { min-width: 0; }
+  .side.b { text-align: right; }
+  .name { font-weight: 700; font-size: clamp(15px, 3.4vmin, 30px); letter-spacing: .04em; text-transform: uppercase;
+    text-shadow: 0 2px 10px rgba(0,0,0,.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .side.a .name { color: var(--a); } .side.b .name { color: var(--b); }
+  .pips { display: flex; gap: 4px; margin-top: 6px; }
+  .side.b .pips { justify-content: flex-end; }
+  .pip { height: clamp(5px, 1vmin, 8px); border-radius: 2px; background: currentColor; transition: opacity .5s, background .5s; }
+  .side.a .pips { color: var(--a); } .side.b .pips { color: var(--b); }
+  .pip.sunk { background: rgba(255,255,255,.18); }
+  #mid { text-align: center; flex: 0 0 auto; }
+  #count { font-size: clamp(12px, 2.2vmin, 18px); color: var(--dim); letter-spacing: .18em; text-transform: uppercase; }
+  #feed { margin-top: 4px; font-size: clamp(13px, 2.6vmin, 22px); font-weight: 600; letter-spacing: .06em; min-height: 1.3em;
+    text-shadow: 0 2px 10px rgba(0,0,0,.7); }
+  #card { top: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+    opacity: 0; transition: opacity .8s; padding: 24px; }
+  #card.on { opacity: 1; }
+  #card .kicker { font-size: clamp(12px, 2.4vmin, 20px); letter-spacing: .4em; color: var(--dim); text-transform: uppercase; }
+  #card .title { font-size: clamp(30px, 8.5vmin, 92px); font-weight: 700; letter-spacing: .03em; line-height: 1.05; text-transform: uppercase;
+    text-shadow: 0 6px 30px rgba(0,0,0,.65); margin: .15em 0; }
+  #card .sub { font-size: clamp(14px, 3vmin, 26px); letter-spacing: .12em; }
+  #card .va { color: var(--a); } #card .vb { color: var(--b); }
+  #bar { bottom: 0; padding: clamp(8px, 2vmin, 18px); display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; transition: opacity .3s; }
+  #bar.hide { opacity: 0; }
+  #bar.hide button, #bar.hide label { pointer-events: none; }
+  button, label.btn { pointer-events: auto; font: inherit; font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink); background: var(--panel); border: 1px solid rgba(243,237,228,.25); border-radius: 6px; padding: 7px 12px; cursor: pointer;
+    backdrop-filter: blur(6px); }
+  button:hover, label.btn:hover { border-color: rgba(243,237,228,.7); }
+  button:focus-visible, label.btn:focus-within { outline: 2px solid var(--b); outline-offset: 2px; }
+  input[type=file] { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .bars { position: fixed; left: 0; right: 0; height: 0; background: #05080f; transition: height .7s ease; pointer-events: none; }
+  #barT { top: 0; } #barB { bottom: 0; }
+  body.cine .bars { height: 9vh; }
+  #msg { top: 40%; text-align: center; padding: 24px; font-size: 18px; display: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="bars" id="barT"></div><div class="bars" id="barB"></div>
+<div class="hud" id="top">
+  <div class="side a"><div class="name" id="nameA"></div><div class="pips" id="pipsA"></div></div>
+  <div id="mid"><div id="count"></div><div id="feed"></div></div>
+  <div class="side b"><div class="name" id="nameB"></div><div class="pips" id="pipsB"></div></div>
+</div>
+<div class="hud" id="card"><div class="kicker" id="kicker"></div><div class="title" id="title"></div><div class="sub" id="sub"></div></div>
+<div class="hud" id="msg">No replay found. Run <b>python scripts/export_replay.py</b>, or load a replay .json file below.</div>
+<div class="hud" id="bar">
+  <button id="restart">Restart</button>
+  <button id="pause">Pause</button>
+  <button id="speed">Speed 1x</button>
+  <button id="sound">Sound off</button>
+  <button id="loop">Loop on</button>
+  <label class="btn">Load replay<input type="file" id="file" accept=".json,application/json"></label>
+  <button id="hide" title="Press H to bring the controls back">Hide controls (H)</button>
+</div>
+
+<script src="replay.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+'use strict';
+const $ = id => document.getElementById(id);
+if (!window.THREE) { $('msg').style.display = 'block'; $('msg').textContent = 'Could not load the 3D library (needs an internet connection).'; return; }
+
+/* ---------- constants ---------- */
+const GAP = 3, INTRO = 7.0, FLIGHT = 0.75, TARGET_BATTLE = 42;
+const CINE_CHANCE = 0.35;   // chance that a sinking gets a slow-motion close-up (the final one always does)
+const CINE_SLOW = 0.28;     // time scale during a close-up
+const TEAM = {
+  A: { hull: 0x8b939c, deck: 0xb9b2a6, accent: 0xff7a45, css: 'va' },
+  B: { hull: 0x3d5068, deck: 0x8fa3b5, accent: 0x3fd0c9, css: 'vb' },
+};
+const SHIP_NAMES = { carrier: 'Carrier', battleship: 'Battleship', cruiser: 'Cruiser', submarine: 'Submarine', destroyer: 'Destroyer' };
+
+/* ---------- renderer / scene ---------- */
+const canvas = $('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 600);
+const HORIZON = new THREE.Color(0xe79a68);
+
+(function sky() {
+  const cv = document.createElement('canvas'); cv.width = 4; cv.height = 256;
+  const g = cv.getContext('2d'), grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, '#14224a'); grad.addColorStop(0.22, '#5a4a72'); grad.addColorStop(0.4, '#e79a68'); grad.addColorStop(1, '#e79a68');
+  g.fillStyle = grad; g.fillRect(0, 0, 4, 256);
+  scene.background = new THREE.CanvasTexture(cv);
+})();
+
+scene.add(new THREE.HemisphereLight(0xffe2c2, 0x10294a, 0.85));
+const sun = new THREE.DirectionalLight(0xffb27a, 1.1); sun.position.set(-30, 14, -40); scene.add(sun);
+const fill = new THREE.DirectionalLight(0x8fb4ff, 0.35); fill.position.set(20, 30, 30); scene.add(fill);
+const flash = new THREE.PointLight(0xffa040, 0, 18); scene.add(flash);
+
+/* ---------- water ---------- */
+function waveH(x, z, t) {
+  return 0.07 * Math.sin(0.6 * x + 1.1 * t) + 0.05 * Math.sin(0.9 * z + 1.4 * t + 1.3) + 0.03 * Math.sin(0.5 * (x + z) + 0.8 * t);
+}
+const waterMat = new THREE.ShaderMaterial({
+  uniforms: { uT: { value: 0 }, uSun: { value: sun.position.clone().normalize() }, uFog: { value: HORIZON } },
+  vertexShader: `
+    uniform float uT; varying vec3 vW;
+    void main(){ vec3 p = position;
+      p.y += 0.07*sin(0.6*p.x+1.1*uT)+0.05*sin(0.9*p.z+1.4*uT+1.3)+0.03*sin(0.5*(p.x+p.z)+0.8*uT);
+      vec4 w = modelMatrix*vec4(p,1.0); vW = w.xyz; gl_Position = projectionMatrix*viewMatrix*w; }`,
+  fragmentShader: `
+    uniform float uT; uniform vec3 uSun; uniform vec3 uFog; varying vec3 vW;
+    void main(){ float x=vW.x, z=vW.z;
+      float d1=cos(1.9*x+1.3*z+2.1*uT), d2=cos(-1.1*x+2.7*z+1.6*uT), d3=cos(3.7*x+0.9*z+2.6*uT), d4=cos(0.7*x-3.9*z+2.3*uT);
+      float dx = 0.042*cos(0.6*x+1.1*uT)+0.015*cos(0.5*(x+z)+0.8*uT) + 0.030*d1 - 0.016*d2 + 0.022*d3 + 0.006*d4;
+      float dz = 0.045*cos(0.9*z+1.4*uT+1.3)+0.015*cos(0.5*(x+z)+0.8*uT) + 0.020*d1 + 0.038*d2 + 0.006*d3 - 0.030*d4;
+      vec3 n = normalize(vec3(-dx,1.0,-dz));
+      vec3 v = normalize(cameraPosition - vW);
+      float fres = pow(1.0-max(dot(n,v),0.0),3.0);
+      vec3 deep = vec3(0.035,0.16,0.27), shallow = vec3(0.07,0.33,0.43);
+      vec3 col = mix(deep, shallow, clamp(0.5+n.x*2.0+n.z*1.5,0.0,1.0));
+      col = mix(col, vec3(0.93,0.66,0.47), fres*0.55);
+      vec3 h = normalize(uSun+v);
+      col += vec3(1.0,0.72,0.45)*pow(max(dot(n,h),0.0),70.0)*0.4;
+      float d = length(cameraPosition - vW);
+      col = mix(col, uFog, smoothstep(45.0,190.0,d));
+      gl_FragColor = vec4(col,1.0); }`,
+});
+const waterGeo = new THREE.PlaneGeometry(600, 600, 200, 200); waterGeo.rotateX(-Math.PI / 2);
+scene.add(new THREE.Mesh(waterGeo, waterMat));
+
+/* ---------- particles ---------- */
+function dotTexture() {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+  const g = cv.getContext('2d'), grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,1)'); grad.addColorStop(0.45, 'rgba(255,255,255,.55)'); grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(cv);
+}
+const DOT = dotTexture();
+function makePool(n, blending) {
+  const items = [];
+  for (let i = 0; i < n; i++) {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: DOT, transparent: true, depthWrite: false, blending }));
+    s.visible = false; scene.add(s); items.push({ s, life: 0 });
+  }
+  return { items, next: 0 };
+}
+const glow = makePool(450, THREE.AdditiveBlending), puff = makePool(650, THREE.NormalBlending);
+function spawn(pool, o) {
+  const p = pool.items[pool.next]; pool.next = (pool.next + 1) % pool.items.length;
+  p.life = p.max = o.life; p.vx = o.vx || 0; p.vy = o.vy || 0; p.vz = o.vz || 0; p.g = o.g || 0;
+  p.s0 = o.s0; p.s1 = o.s1 == null ? o.s0 : o.s1; p.a = o.a == null ? 1 : o.a;
+  p.s.position.set(o.x, o.y, o.z); p.s.material.color.set(o.color); p.s.visible = true;
+}
+function stepPool(pool, dt) {
+  for (const p of pool.items) {
+    if (p.life <= 0) continue;
+    p.life -= dt;
+    if (p.life <= 0) { p.s.visible = false; continue; }
+    const k = 1 - p.life / p.max;
+    p.vy += p.g * dt;
+    p.s.position.x += p.vx * dt; p.s.position.y += p.vy * dt; p.s.position.z += p.vz * dt;
+    const sc = p.s0 + (p.s1 - p.s0) * k; p.s.scale.set(sc, sc, 1);
+    p.s.material.opacity = p.a * (1 - k * k);
+  }
+}
+function clearPools() { for (const pool of [glow, puff]) for (const p of pool.items) { p.life = 0; p.s.visible = false; } }
+
+/* ---------- deterministic randomness ---------- */
+let seed = 1;
+function rnd() { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }
+const rr = (a, b) => a + (b - a) * rnd();
+
+/* ---------- ship models ---------- */
+const std = (c, extra) => new THREE.MeshStandardMaterial(Object.assign({ color: c, flatShading: true, roughness: 0.82, metalness: 0.12 }, extra || {}));
+const MATS = {};
+function mats(team) {
+  if (MATS[team]) return MATS[team];
+  const t = TEAM[team];
+  return MATS[team] = { hull: std(t.hull), deck: std(t.deck), accent: std(t.accent), dark: std(0x1c232c), keel: std(0x6e2a26), steel: std(0x59636e),
+    flight: std(0x2b333d), paint: std(0xe8e2d4), sub: std(0x27323d), plane: std(0xcfd6dc),
+    glass: new THREE.MeshBasicMaterial({ color: 0xffdc98 }), foam: new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.2, depthWrite: false }),
+    scorch: new THREE.MeshBasicMaterial({ color: 0x0c0a09 }) };
+}
+function box(w, h, d, mat, x, y, z) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); return m; }
+function cyl(r0, r1, h, mat, x, y, z, seg) { const m = new THREE.Mesh(new THREE.CylinderGeometry(r0, r1, h, seg || 8), mat); m.position.set(x, y, z); return m; }
+function hullShape(L, W) {
+  const a = L / 2, s = new THREE.Shape();
+  s.moveTo(-a, -W * 0.36); s.lineTo(-a + 0.15, -W * 0.47); s.lineTo(a * 0.35, -W / 2); s.quadraticCurveTo(a * 0.8, -W * 0.42, a, 0);
+  s.quadraticCurveTo(a * 0.8, W * 0.42, a * 0.35, W / 2); s.lineTo(-a + 0.15, W * 0.47); s.lineTo(-a, W * 0.36); s.closePath(); return s;
+}
+function slab(shape, depth, y, mat) {
+  const g = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 6 }); g.rotateX(-Math.PI / 2); g.translate(0, y, 0);
+  return new THREE.Mesh(g, mat);
+}
+const DECK = 0.28;
+function addHull(g, m, L, W) {
+  g.add(slab(hullShape(L * 0.97, W * 0.88), 0.24, -0.3, m.keel));
+  g.add(slab(hullShape(L, W), 0.36, -0.08, m.hull));
+  g.add(slab(hullShape(L * 1.004, W * 1.03), 0.05, 0.07, m.accent));
+  g.add(slab(hullShape(L * 0.95, W * 0.86), 0.02, DECK, m.deck));
+  addFoam(g, m, L, W);
+}
+function addFoam(g, m, L, W) {
+  const f = new THREE.Mesh(new THREE.ShapeGeometry(hullShape(L * 1.1, W * 1.55)), m.foam); f.rotation.x = -Math.PI / 2; f.position.y = 0.03; g.add(f);
+}
+function turret(g, m, x, y, facing, barrels, big) {
+  const t = new THREE.Group(), r = big ? 0.17 : 0.11, len = big ? 0.5 : 0.32;
+  t.add(cyl(r * 0.85, r, 0.11, m.steel, 0, 0, 0, 6));
+  t.add(box(r * 1.5, 0.09, r * 1.5, m.deck, -r * 0.1, 0.02, 0));
+  for (let i = 0; i < barrels; i++) {
+    const z = (i - (barrels - 1) / 2) * (big ? 0.085 : 0.07), b = cyl(0.022, 0.026, len, m.dark, r * 0.6 + len / 2, 0.03, z, 5); b.rotation.z = Math.PI / 2; t.add(b);
+  }
+  t.position.set(x, y, 0); t.rotation.y = facing; t.userData = { rest: facing, aim: facing, x };
+  g.add(t); g.userData.turrets.push(t);
+}
+function mast(g, m, x, y, h, z) {
+  g.add(cyl(0.015, 0.02, h, m.dark, x, y + h / 2, z || 0, 5)); g.add(box(0.02, 0.02, 0.26, m.dark, x, y + h * 0.7, z || 0));
+  g.add(box(0.16, 0.05, 0.03, m.steel, x, y + h + 0.02, z || 0));
+}
+function funnel(g, m, x, y, r, h) { g.add(cyl(r * 0.85, r, h, m.steel, x, y + h / 2, 0)); g.add(cyl(r * 0.9, r * 0.9, 0.05, m.dark, x, y + h, 0)); }
+function bridge(g, m, w, h, d, x, y, z) {
+  g.add(box(w, h, d, m.deck, x, y + h / 2, z || 0)); g.add(box(w + 0.01, 0.045, d + 0.01, m.glass, x, y + h * 0.72, z || 0));
+}
+function flag(g, m, x) { g.add(cyl(0.01, 0.01, 0.34, m.dark, x, DECK + 0.17, 0, 4)); g.add(box(0.16, 0.1, 0.012, m.accent, x - 0.09, DECK + 0.29, 0)); }
+function aircraft(g, m, x, z, yaw) {
+  const a = new THREE.Group(); a.add(box(0.24, 0.035, 0.045, m.plane, 0, 0, 0)); a.add(box(0.07, 0.015, 0.26, m.plane, 0.01, 0.005, 0));
+  a.add(box(0.04, 0.06, 0.012, m.plane, -0.11, 0.035, 0)); a.add(box(0.03, 0.012, 0.1, m.plane, -0.11, 0.01, 0));
+  a.position.set(x, 0.385, z); a.rotation.y = yaw; g.add(a);
+}
+function shipType(length, index, lengths) {
+  if (length >= 5) return 'carrier'; if (length === 4) return 'battleship'; if (length <= 2) return 'destroyer';
+  return lengths.slice(0, index).includes(3) ? 'submarine' : 'cruiser';
+}
+function buildShip(type, length, team) {
+  const m = mats(team), g = new THREE.Group(), L = length - 0.22;
+  g.userData = { turrets: [], deckY: DECK + 0.03 };
+  if (type === 'submarine') {
+    const bl = L - 0.9, body = cyl(0.2, 0.2, bl, m.sub, 0.05, 0.06, 0, 10); body.rotation.z = Math.PI / 2; g.add(body);
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 6), m.sub); nose.scale.x = 1.7; nose.position.set(0.05 + bl / 2, 0.06, 0); g.add(nose);
+    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.6, 10), m.sub); tail.rotation.z = Math.PI / 2; tail.position.set(0.05 - bl / 2 - 0.3, 0.06, 0); g.add(tail);
+    g.add(box(bl * 0.9, 0.04, 0.17, m.steel, 0.05, 0.25, 0));
+    const band = cyl(0.205, 0.205, 0.09, m.accent, -0.45, 0.06, 0, 10); band.rotation.z = Math.PI / 2; g.add(band);
+    g.add(box(0.5, 0.3, 0.15, m.hull, 0.3, 0.4, 0)); g.add(box(0.51, 0.04, 0.16, m.accent, 0.3, 0.53, 0)); g.add(box(0.1, 0.02, 0.44, m.steel, 0.36, 0.42, 0));
+    g.add(cyl(0.012, 0.012, 0.26, m.dark, 0.4, 0.68, 0.03, 4)); g.add(cyl(0.012, 0.012, 0.18, m.dark, 0.3, 0.64, -0.03, 4));
+    g.add(box(0.16, 0.3, 0.02, m.steel, 0.05 - bl / 2 - 0.3, 0.1, 0)); g.add(box(0.16, 0.02, 0.36, m.steel, 0.05 - bl / 2 - 0.3, 0.06, 0));
+    addFoam(g, m, L * 0.9, 0.34); g.userData.deckY = 0.28;
+    return g;
+  }
+  if (type === 'carrier') {
+    addHull(g, m, L, 0.74);
+    g.add(box(L * 0.97, 0.06, 0.86, m.flight, -0.02, 0.34, 0));
+    const wing = box(L * 0.5, 0.06, 0.34, m.flight, -0.35, 0.34, -0.5); wing.rotation.y = -0.1; g.add(wing);
+    for (let i = 0; i < 7; i++) g.add(box(0.3, 0.008, 0.035, m.paint, -L * 0.42 + i * (L * 0.84 / 6), 0.374, -0.08));
+    const angled = box(L * 0.5, 0.008, 0.03, m.paint, -0.4, 0.374, -0.42); angled.rotation.y = -0.1; g.add(angled);
+    g.add(box(0.05, 0.008, 0.7, m.accent, L * 0.44, 0.374, 0));
+    g.add(box(0.85, 0.26, 0.2, m.hull, 0.35, 0.5, 0.32)); bridge(g, m, 0.5, 0.2, 0.19, 0.45, 0.63, 0.32);
+    g.add(cyl(0.05, 0.06, 0.2, m.steel, 0.1, 0.72, 0.32)); mast(g, m, 0.5, 0.83, 0.36, 0.32);
+    aircraft(g, m, 1.35, 0.12, 0.25); aircraft(g, m, 0.95, 0.22, 0.25); aircraft(g, m, -1.3, 0.24, -0.3); aircraft(g, m, -1.65, 0.2, -0.3); aircraft(g, m, -0.6, -0.5, 1.2);
+    g.userData.deckY = 0.385;
+    return g;
+  }
+  addHull(g, m, L, type === 'destroyer' ? 0.52 : 0.62);
+  if (type === 'battleship') {
+    g.add(box(1.4, 0.14, 0.42, m.hull, -0.15, DECK + 0.07, 0)); g.add(box(0.8, 0.18, 0.34, m.deck, 0.05, DECK + 0.23, 0));
+    bridge(g, m, 0.34, 0.3, 0.3, 0.3, DECK + 0.32, 0); g.add(box(0.14, 0.1, 0.22, m.steel, 0.3, DECK + 0.67, 0));
+    mast(g, m, 0.12, DECK + 0.32, 0.6); funnel(g, m, -0.22, DECK + 0.32, 0.1, 0.34); funnel(g, m, -0.55, DECK + 0.14, 0.09, 0.42);
+    g.add(cyl(0.15, 0.17, 0.12, m.hull, 0.92, DECK + 0.06, 0));
+    turret(g, m, 1.32, DECK + 0.06, 0, 3, true); turret(g, m, 0.92, DECK + 0.18, 0, 3, true); turret(g, m, -1.22, DECK + 0.06, Math.PI, 3, true);
+    for (const z of [-0.2, 0.2]) { g.add(box(0.14, 0.08, 0.1, m.steel, -0.1, DECK + 0.18, z * 1.15)); g.add(box(0.14, 0.08, 0.1, m.steel, -0.8, DECK + 0.05, z)); }
+    flag(g, m, -L / 2 + 0.12);
+  } else if (type === 'cruiser') {
+    g.add(box(1.0, 0.14, 0.38, m.hull, -0.08, DECK + 0.07, 0)); bridge(g, m, 0.32, 0.28, 0.28, 0.22, DECK + 0.14, 0);
+    mast(g, m, 0.05, DECK + 0.14, 0.5); funnel(g, m, -0.28, DECK + 0.14, 0.09, 0.3);
+    g.add(box(0.22, 0.1, 0.24, m.accent, -0.55, DECK + 0.19, 0));
+    turret(g, m, 0.88, DECK + 0.06, 0, 2, true); turret(g, m, -0.95, DECK + 0.06, Math.PI, 2, true); flag(g, m, -L / 2 + 0.1);
+  } else {
+    g.add(box(0.55, 0.14, 0.32, m.hull, -0.12, DECK + 0.07, 0)); bridge(g, m, 0.22, 0.18, 0.24, -0.02, DECK + 0.14, 0);
+    mast(g, m, -0.16, DECK + 0.14, 0.34); g.add(cyl(0.05, 0.06, 0.16, m.steel, -0.3, DECK + 0.22, 0));
+    g.add(box(0.16, 0.06, 0.2, m.accent, -0.6, DECK + 0.04, 0));
+    turret(g, m, 0.42, DECK + 0.06, 0, 2, false);
+  }
+  return g;
+}
+
+/* ---------- sound (all synthesised, no audio files) ---------- */
+const sfx = (function () {
+  let ctx = null, master, damp, bus, noiseBuf, on = false, focus = 0, slow = 1;
+  function init() {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return false;
+    ctx = new AC();
+    master = ctx.createGain(); master.gain.value = 0.0001;
+    const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -16; comp.ratio.value = 5;
+    damp = ctx.createBiquadFilter(); damp.type = 'lowpass'; damp.frequency.value = 1300; damp.Q.value = 0.4;   // heard from high above
+    bus = ctx.createGain();
+    const echo = ctx.createDelay(1); echo.delayTime.value = 0.21;                                              // sound rolling over open water
+    const fb = ctx.createGain(); fb.gain.value = 0.28;
+    const echoTone = ctx.createBiquadFilter(); echoTone.type = 'lowpass'; echoTone.frequency.value = 700;
+    const echoMix = ctx.createGain(); echoMix.gain.value = 0.3;
+    bus.connect(damp); bus.connect(echo); echo.connect(echoTone); echoTone.connect(fb); fb.connect(echo); echoTone.connect(echoMix); echoMix.connect(damp);
+    damp.connect(comp); comp.connect(master); master.connect(ctx.destination);
+    noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+    const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    /* ocean bed: slow swell plus a little wind */
+    const sea = ctx.createBufferSource(); sea.buffer = noiseBuf; sea.loop = true;
+    const seaF = ctx.createBiquadFilter(); seaF.type = 'lowpass'; seaF.frequency.value = 420;
+    const seaG = ctx.createGain(); seaG.gain.value = 0.16;
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.13; const lfoG = ctx.createGain(); lfoG.gain.value = 0.07;
+    lfo.connect(lfoG); lfoG.connect(seaG.gain); sea.connect(seaF); seaF.connect(seaG); seaG.connect(bus); sea.start(); lfo.start();
+    const wind = ctx.createBufferSource(); wind.buffer = noiseBuf; wind.loop = true; wind.playbackRate.value = 0.7;
+    const windF = ctx.createBiquadFilter(); windF.type = 'bandpass'; windF.frequency.value = 900; windF.Q.value = 0.5;
+    const windG = ctx.createGain(); windG.gain.value = 0.035; wind.connect(windF); windF.connect(windG); windG.connect(bus); wind.start();
+    return true;
+  }
+  function out(x) {
+    if (!ctx.createStereoPanner) return bus;
+    const p = ctx.createStereoPanner(); p.pan.value = Math.max(-0.7, Math.min(0.7, (x || 0) / 16)); p.connect(bus); return p;
+  }
+  /* sound from far below arrives a beat late; close-ups are immediate */
+  const when = () => ctx.currentTime + 0.02 + 0.16 * (1 - focus);
+  function noise(o) {
+    const k = slow, t = when() + (o.at || 0), dur = o.dur / k;
+    const src = ctx.createBufferSource(); src.buffer = noiseBuf; src.loop = true; src.playbackRate.value = (0.8 + Math.random() * 0.4) * k;
+    const f = ctx.createBiquadFilter(); f.type = o.type || 'lowpass'; f.Q.value = o.q || 0.7;
+    f.frequency.setValueAtTime(o.f0 * k, t); f.frequency.exponentialRampToValueAtTime(Math.max(30, o.f1 * k), t + dur);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(o.gain, t + (o.attack || 0.008)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f); f.connect(g); g.connect(out(o.x)); src.start(t, Math.random()); src.stop(t + dur + 0.05);
+  }
+  function tone(o) {
+    const k = slow, t = when() + (o.at || 0), dur = o.dur / k;
+    const osc = ctx.createOscillator(); osc.type = o.wave || 'sine';
+    osc.frequency.setValueAtTime(o.f0 * k, t); osc.frequency.exponentialRampToValueAtTime(Math.max(20, o.f1 * k), t + dur);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(o.gain, t + (o.attack || 0.006)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g); g.connect(out(o.x)); osc.start(t); osc.stop(t + dur + 0.05);
+  }
+  const ready = () => on && ctx && !skipRender;
+  return {
+    toggle() {
+      if (!ctx && !init()) return false;
+      on = !on; if (on) ctx.resume();
+      master.gain.cancelScheduledValues(ctx.currentTime); master.gain.setTargetAtTime(on ? 0.9 : 0.0001, ctx.currentTime, 0.15);
+      return on;
+    },
+    /* f: 0 = aerial view, 1 = close-up; s: current time scale (slow motion lowers pitch) */
+    view(f, s) { focus = f; slow = 0.55 + 0.45 * s; if (ctx) damp.frequency.setTargetAtTime(1300 + 5200 * f * f, ctx.currentTime, 0.1); },
+    gun(x) { if (!ready()) return;
+      tone({ x, f0: 150, f1: 42, dur: 0.22, gain: 0.5 }); noise({ x, f0: 1400, f1: 180, dur: 0.3, gain: 0.4 }); noise({ x, at: 0.03, f0: 500, f1: 90, dur: 0.9, gain: 0.12 }); },
+    splash(x) { if (!ready()) return;
+      noise({ x, type: 'bandpass', q: 0.8, f0: 2600, f1: 500, dur: 0.75, gain: 0.34, attack: 0.03 }); tone({ x, f0: 210, f1: 70, dur: 0.22, gain: 0.16 }); },
+    hit(x) { if (!ready()) return;
+      tone({ x, f0: 110, f1: 30, dur: 0.7, gain: 0.75 }); noise({ x, f0: 2400, f1: 110, dur: 0.9, gain: 0.6 });
+      tone({ x, wave: 'triangle', f0: 620, f1: 190, dur: 0.16, gain: 0.12 }); },
+    boom(x, at) { if (!ready()) return;
+      tone({ x, at, f0: 85, f1: 24, dur: 1.5, gain: 0.95 }); noise({ x, at, f0: 1800, f1: 70, dur: 1.9, gain: 0.8 }); },
+    sink(x) { if (!ready()) return;
+      noise({ x, at: 0.4, type: 'bandpass', q: 0.6, f0: 900, f1: 260, dur: 3.6, gain: 0.26, attack: 0.5 });      // water rushing in
+      tone({ x, at: 0.3, wave: 'sawtooth', f0: 74, f1: 38, dur: 2.6, gain: 0.1, attack: 0.4 });                  // hull groan
+      tone({ x, at: 0.9, wave: 'sawtooth', f0: 97, f1: 51, dur: 1.8, gain: 0.06, attack: 0.3 }); },
+  };
+})();
+
+/* ---------- match state ---------- */
+const world = new THREE.Group(); scene.add(world);
+let R = null, ships = { A: [], B: [] }, cellShip = { A: {}, B: {} }, events = [], evIndex = 0, tweens = [], emitters = [];
+let clock = 0, speed = 1, paused = false, loop = true, endAt = 0, shake = 0;
+let cine = null, cineShip = null, cineStart = 0, focusW = 0, timeScale = 1;
+let rows = 10, cols = 10;
+
+function cellPos(player, r, c) {
+  const x0 = player === 'A' ? -(cols + GAP / 2) : GAP / 2;
+  return { x: x0 + c + 0.5, z: -rows / 2 + r + 0.5 };
+}
+const cellName = (r, c) => String.fromCharCode(65 + c) + (r + 1);
+const ease = k => 1 - Math.pow(1 - k, 3);
+const smooth = k => k * k * (3 - 2 * k);
+function addTween(start, dur, update, done) { tweens.push({ start, dur, update, done }); }
+function at(t, fn) { events.push({ t, fn }); }
+
+function buildBoard(player) {
+  const t = TEAM[player], x0 = player === 'A' ? -(cols + GAP / 2) : GAP / 2, z0 = -rows / 2, pts = [];
+  for (let i = 0; i <= cols; i++) pts.push(x0 + i, 0, z0, x0 + i, 0, z0 + rows);
+  for (let j = 0; j <= rows; j++) pts.push(x0, 0, z0 + j, x0 + cols, 0, z0 + j);
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  const lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: t.accent, transparent: true, opacity: 0 })); lines.position.y = 0.17; world.add(lines);
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(cols, rows), new THREE.MeshBasicMaterial({ color: t.accent, transparent: true, opacity: 0, depthWrite: false }));
+  plane.rotation.x = -Math.PI / 2; plane.position.set(x0 + cols / 2, 0.16, 0); world.add(plane);
+  addTween(INTRO - 2.2, 1.8, k => { lines.material.opacity = 0.42 * k; plane.material.opacity = 0.07 * k; });
+}
+
+function build(replay) {
+  R = replay; rows = R.rules.rows; cols = R.rules.cols; seed = (R.seed || 1) * 7919 + 13;
+  while (world.children.length) world.remove(world.children[0]);
+  clearPools(); events = []; evIndex = 0; tweens = []; emitters = []; clock = 0; shake = 0; flash.intensity = 0; cine = null; cineShip = null;
+  ships = { A: [], B: [] }; cellShip = { A: {}, B: {} };
+
+  for (const P of ['A', 'B']) {
+    buildBoard(P);
+    const list = R.placements[P] || [], lengths = list.map(s => s.length), dir = P === 'A' ? 1 : -1;
+    $('name' + P).textContent = R.players[P].name;
+    const pips = $('pips' + P); pips.innerHTML = '';
+    list.forEach((sp, i) => {
+      const type = shipType(sp.length, i, lengths), mesh = buildShip(type, sp.length, P);
+      const first = sp.cells[0], last = sp.cells[sp.cells.length - 1];
+      const p0 = cellPos(P, first[0], first[1]), p1 = cellPos(P, last[0], last[1]);
+      const fx = (p0.x + p1.x) / 2, fz = (p0.z + p1.z) / 2, horizontal = first[0] === last[0];
+      const startRot = P === 'A' ? 0 : Math.PI, endRot = horizontal ? startRot : startRot + (i % 2 ? 1 : -1) * Math.PI / 2;
+      const sx = fx - dir * (34 + i * 5), delay = 0.4 + i * 0.35, dur = INTRO - 1.6 - delay;
+      const ship = { slot: sp.slot, type, mesh, turrets: mesh.userData.turrets, shotsFired: 0, x: sx, z: fz, rot: startRot, sunk: false, sinking: 0, moving: true, team: P, length: sp.length, dir };
+      mesh.position.set(sx, 0, fz); mesh.rotation.y = startRot; world.add(mesh);
+      addTween(delay, dur, k => { const e = ease(k); ship.x = sx + (fx - sx) * e; ship.rot = startRot + (endRot - startRot) * smooth(Math.max(0, (k - 0.6) / 0.4)); ship.speed = 1 - k; },
+        () => { ship.moving = false; });
+      ships[P].push(ship); for (const c of sp.cells) cellShip[P][c[0] + ',' + c[1]] = ship;
+      const pip = document.createElement('div'); pip.className = 'pip'; pip.style.width = `clamp(${sp.length * 5}px, ${sp.length * 1.3}vmin, ${sp.length * 12}px)`; pips.appendChild(pip); ship.pip = pip;
+    });
+  }
+
+  /* title card */
+  $('kicker').textContent = 'Battleship AI Hackathon';
+  $('title').innerHTML = `<span class="va"></span><br>vs<br><span class="vb"></span>`;
+  $('title').children[0].textContent = R.players.A.name; $('title').children[2].textContent = R.players.B.name;
+  $('sub').textContent = 'Two bots. One ocean.'; $('card').classList.add('on');
+  at(INTRO - 2.6, () => $('card').classList.remove('on'));
+  $('count').textContent = ''; $('feed').textContent = '';
+
+  /* schedule shots */
+  const gapOf = s => s.outcome === 'miss' ? 0.42 : s.outcome === 'hit' ? 0.8 : 1.9;
+  const raw = R.shots.reduce((sum, s) => sum + gapOf(s), 0), scale = Math.min(1.6, Math.max(0.45, TARGET_BATTLE / Math.max(raw, 1)));
+  const alive = { A: ships.A.slice(), B: ships.B.slice() }, turnOf = { A: 0, B: 0 };
+  let t = INTRO, lastCine = -99; const cineTimes = window.__cine = [];
+  R.shots.forEach((s, i) => {
+    const shooterTeam = s.player, target = shooterTeam === 'A' ? 'B' : 'A';
+    const pool = alive[shooterTeam], shooter = pool.length ? pool[turnOf[shooterTeam]++ % pool.length] : null;
+    const victim = s.sunk ? ships[target].find(v => v.slot === s.sunk.slot) : null;
+    if (victim) alive[target] = alive[target].filter(v => v !== victim);
+    const launch = t, final = i === R.shots.length - 1;
+    if (victim && (final || (rnd() < CINE_CHANCE && launch - lastCine > 6))) {
+      lastCine = launch; cineTimes.push(launch);
+      at(launch - 0.25, () => { cine = { end: launch + FLIGHT + (final ? 1.7 : 0.8) }; cineShip = victim; cineStart = wall; });
+    }
+    at(launch, () => fire(shooter, shooterTeam, target, s, i, launch, victim));
+    t += gapOf(s) * scale;
+  });
+  endAt = t + FLIGHT + 2.6;
+  at(endAt, () => {
+    const w = R.winner;
+    $('kicker').textContent = R.reason === 'all ships sunk' ? 'Fleet destroyed' : R.reason;
+    $('title').innerHTML = `<span class="${TEAM[w].css}"></span><br>wins`; $('title').children[0].textContent = R.players[w].name;
+    $('sub').textContent = `${R.turns} shots fired`; $('card').classList.add('on');
+  });
+  events.sort((a, b) => a.t - b.t);
+  $('msg').style.display = 'none';
+}
+
+/* ---------- effects ---------- */
+function fire(shooter, shooterTeam, target, s, i, launch, victim) {
+  const to = cellPos(target, s.row, s.col);
+  const from = shooter ? { x: shooter.x, z: shooter.z } : { x: (shooterTeam === 'A' ? -1 : 1) * (cols / 2 + GAP), z: 0 };
+  if (shooter && shooter.turrets.length) {
+    /* every turret swings onto the target; the shell leaves from one of them */
+    const yaw = Math.atan2(-(to.z - shooter.z), to.x - shooter.x);
+    for (const tr of shooter.turrets) tr.userData.aim = yaw - shooter.rot;
+    const tr = shooter.turrets[shooter.shotsFired++ % shooter.turrets.length];
+    from.x += Math.cos(shooter.rot) * tr.userData.x; from.z -= Math.sin(shooter.rot) * tr.userData.x;
+  }
+  const dx = to.x - from.x, dz = to.z - from.z, dist = Math.hypot(dx, dz), apex = 1.6 + dist * 0.22;
+  for (let k = 0; k < 6; k++) spawn(glow, { x: from.x, y: 0.6, z: from.z, vx: dx / dist * rr(2, 5) + rr(-1, 1), vy: rr(1, 3), vz: dz / dist * rr(2, 5) + rr(-1, 1), life: rr(0.15, 0.3), s0: 0.5, s1: 1.1, color: 0xffc070 });
+  for (let k = 0; k < 4; k++) spawn(puff, { x: from.x, y: 0.7, z: from.z, vx: rr(-0.6, 0.6), vy: rr(0.5, 1.2), vz: rr(-0.6, 0.6), life: rr(0.6, 1.0), s0: 0.4, s1: 1.3, a: 0.5, color: 0xd8d0c8 });
+  sfx.gun(from.x);
+  const shell = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5), new THREE.MeshBasicMaterial({ color: 0xffd9a0 })); world.add(shell);
+  addTween(launch, FLIGHT, k => {
+    const x = from.x + dx * k, z = from.z + dz * k, y = 0.6 + (0.2 - 0.6) * k + apex * 4 * k * (1 - k);
+    shell.position.set(x, y, z);
+    spawn(glow, { x, y, z, life: 0.22, s0: 0.28, s1: 0.05, a: 0.8, color: TEAM[shooterTeam].accent });
+  }, () => {
+    world.remove(shell);
+    $('count').textContent = `Shot ${i + 1} / ${R.shots.length}`;
+    const who = R.players[shooterTeam].name, cell = cellName(s.row, s.col);
+    if (s.outcome === 'miss') { splash(to.x, to.z); sfx.splash(to.x); $('feed').textContent = `${who} · ${cell} · miss`; $('feed').style.color = ''; }
+    else {
+      explode(to.x, to.z, false); sfx.hit(to.x); scorch(cellShip[target][s.row + ',' + s.col], to); emitters.push({ x: to.x, z: to.z, team: target, row: s.row, col: s.col, acc: 0, on: true });
+      $('feed').textContent = `${who} · ${cell} · HIT`; $('feed').style.color = '#ffd27a';
+      if (victim) sink(victim, s.sunk.cells, target, who);
+    }
+  });
+}
+function scorch(ship, to) {
+  if (!ship) return;
+  const wx = to.x - ship.x, wz = to.z - ship.z, c = Math.cos(ship.rot), sn = Math.sin(ship.rot);
+  const mark = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.02, 7), mats(ship.team).scorch);
+  mark.position.set(c * wx - sn * wz, ship.mesh.userData.deckY, sn * wx + c * wz); ship.mesh.add(mark);
+}
+function splash(x, z) {
+  for (let k = 0; k < 14; k++) spawn(puff, { x: x + rr(-0.12, 0.12), y: 0.15, z: z + rr(-0.12, 0.12), vx: rr(-0.7, 0.7), vy: rr(3, 6.5), vz: rr(-0.7, 0.7), g: -12, life: rr(0.6, 0.95), s0: 0.22, s1: 0.5, a: 0.9, color: 0xf4fbff });
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 24), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide }));
+  ring.rotation.x = -Math.PI / 2; ring.position.set(x, 0.19, z); world.add(ring);
+  addTween(clock, 0.9, k => { const sc = 0.15 + 0.6 * ease(k); ring.scale.set(sc, sc, sc); ring.material.opacity = 0.8 * (1 - k); }, () => world.remove(ring));
+  const peg = new THREE.Mesh(new THREE.RingGeometry(0.13, 0.2, 16), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }));
+  peg.rotation.x = -Math.PI / 2; peg.position.set(x, 0.18, z); world.add(peg);
+}
+function explode(x, z, big) {
+  const n = big ? 34 : 16, v = big ? 5.5 : 3.2;
+  for (let k = 0; k < n; k++) spawn(glow, { x, y: 0.5, z, vx: rr(-v, v) * 0.6, vy: rr(1, v), vz: rr(-v, v) * 0.6, g: -5, life: rr(0.3, big ? 0.9 : 0.6), s0: big ? 1.3 : 0.8, s1: 0.2, color: rnd() < 0.5 ? 0xffa030 : 0xff5a1e });
+  for (let k = 0; k < (big ? 14 : 6); k++) spawn(puff, { x: x + rr(-0.3, 0.3), y: 0.6, z: z + rr(-0.3, 0.3), vx: rr(-0.8, 0.8), vy: rr(1, 2.6), vz: rr(-0.8, 0.8), life: rr(1.2, 2.4), s0: 0.6, s1: big ? 3 : 1.9, a: 0.55, color: 0x2a2623 });
+  flash.position.set(x, 2, z); flash.intensity = big ? 5 : 2.6; shake = Math.max(shake, big ? 0.45 : 0.12);
+}
+function sink(ship, cells, team, who) {
+  ship.sunk = true; ship.pip.classList.add('sunk');
+  for (const e of emitters) if (e.team === team && cells.some(c => c[0] === e.row && c[1] === e.col)) e.on = false;
+  cells.forEach((c, idx) => { const p = cellPos(team, c[0], c[1]); at(clock + idx * 0.12, () => explode(p.x, p.z, idx % 2 === 0)); if (idx % 2 === 0) sfx.boom(p.x, idx * 0.12); });
+  sfx.sink(ship.x);
+  events.sort((a, b) => a.t - b.t);
+  const name = SHIP_NAMES[ship.type] || 'ship', roll = (rnd() < 0.5 ? -1 : 1) * rr(0.45, 0.8), pitch = rr(-0.3, 0.3);
+  $('feed').textContent = `${who} sinks the ${name}!`; $('feed').style.color = '#ff8a5c';
+  addTween(clock + 0.3, 3.4, k => {
+    ship.sinking = k; ship.roll = roll * smooth(Math.min(1, k * 1.6)); ship.pitch = pitch * k;
+    if (rnd() < 0.5) spawn(puff, { x: ship.x + rr(-1, 1) * ship.length * 0.35, y: 0.2, z: ship.z + rr(-0.5, 0.5), vy: rr(0.6, 1.6), life: rr(0.6, 1.2), s0: 0.3, s1: 0.9, a: 0.7, color: 0xeaf6ff });
+  }, () => { ship.mesh.visible = false; });
+}
+
+/* ---------- frame loop ---------- */
+function layout() {
+  const w = window.innerWidth, h = window.innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', layout); layout();
+
+function placeCamera(t) {
+  const aspect = camera.aspect, pull = 1 + 0.75 * (1 - smooth(Math.min(1, clock / (INTRO - 0.5))));
+  const sway = Math.sin(t * 0.13) * 0.06;
+  let px, py, pz, tx = 0, tz = 0;
+  if (aspect >= 1) { const f = Math.max(1, 1.55 / aspect) * pull; camera.fov = 40; px = Math.sin(sway) * 30 * f; py = 17.5 * f; pz = 20 * f * Math.cos(sway); tz = 0.6; }
+  else { const f = Math.max(1, 0.56 / aspect) * pull; camera.fov = 46; px = -27 * f * Math.cos(sway); py = 21 * f; pz = Math.sin(sway) * 27 * f; tx = -0.5; }
+  camera.updateProjectionMatrix();
+  let ty = 0;
+  if (focusW > 0 && cineShip) {
+    /* blend from the aerial view to a low orbit around the ship that is about to sink */
+    const sh = cineShip, w = smooth(focusW), hfov = Math.atan(Math.tan(camera.fov * Math.PI / 360) * aspect);
+    const dist = Math.max(6, (sh.length + 2.2) / (2 * Math.tan(hfov)));
+    let dx = px - sh.x, dz = pz - sh.z; const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
+    const a = 0.45 + (t - cineStart) * 0.1, ca = Math.cos(a), sa = Math.sin(a);
+    const cx = sh.x + (dx * ca - dz * sa) * dist, cz = sh.z + (dx * sa + dz * ca) * dist, cy = dist * 0.36 + 0.9;
+    px += (cx - px) * w; py += (cy - py) * w; pz += (cz - pz) * w; tx += (sh.x - tx) * w; tz += (sh.z - tz) * w; ty = 0.35 * w;
+  }
+  camera.position.set(px + (Math.random() - 0.5) * shake, py + (Math.random() - 0.5) * shake, pz + (Math.random() - 0.5) * shake);
+  camera.lookAt(tx, ty, tz);
+}
+
+let last = performance.now(), wall = 0, skipRender = false;
+function step(dt) {
+  wall += dt; waterMat.uniforms.uT.value = wall;
+  if (R && !paused) {
+    const active = !!cine && clock < cine.end; if (cine && !active) cine = null;
+    timeScale += ((active ? CINE_SLOW : 1) - timeScale) * Math.min(1, dt * 5);
+    focusW = Math.max(0, Math.min(1, focusW + (active ? 1 : -1) * dt / 0.85));
+    document.body.classList.toggle('cine', active); sfx.view(focusW, timeScale);
+    clock += dt * speed * timeScale;
+    while (evIndex < events.length && events[evIndex].t <= clock) events[evIndex++].fn();
+    for (let i = tweens.length - 1; i >= 0; i--) {
+      const tw = tweens[i]; if (clock < tw.start) continue;
+      const k = Math.min(1, (clock - tw.start) / tw.dur); tw.update(k);
+      if (k >= 1) { tweens.splice(i, 1); if (tw.done) tw.done(); }
+    }
+    const sdt = dt * speed * timeScale;
+    for (const e of emitters) {
+      if (!e.on) continue; e.acc += sdt;
+      while (e.acc > 0.11) { e.acc -= 0.11;
+        spawn(glow, { x: e.x + rr(-0.15, 0.15), y: 0.45, z: e.z + rr(-0.15, 0.15), vy: rr(0.8, 1.7), life: rr(0.35, 0.6), s0: 0.55, s1: 0.12, color: rnd() < 0.5 ? 0xff8a20 : 0xffc040 });
+        if (rnd() < 0.4) spawn(puff, { x: e.x, y: 0.8, z: e.z, vx: rr(0.2, 0.6), vy: rr(0.9, 1.5), vz: rr(-0.2, 0.2), life: rr(1.2, 2), s0: 0.35, s1: 1.4, a: 0.4, color: 0x2a2623 });
+      }
+    }
+    for (const P of ['A', 'B']) for (const s of ships[P]) {
+      if (!s.mesh.visible) continue;
+      const bob = waveH(s.x, s.z, wall) * 0.9, k = s.sinking;
+      s.mesh.position.set(s.x, bob - (s.type === 'submarine' ? 0.05 : 0) - k * k * 2.6, s.z);
+      s.mesh.rotation.set((s.roll || 0) + Math.sin(wall * 1.3 + s.x) * 0.03, s.rot, (s.pitch || 0) + Math.sin(wall * 1.1 + s.z) * 0.02);
+      for (const tr of s.turrets) {
+        let d = tr.userData.aim - tr.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); tr.rotation.y += d * Math.min(1, sdt * 9);
+      }
+      if (s.moving && s.speed > 0.03 && rnd() < 0.9) {
+        const bx = s.x - Math.cos(s.rot) * s.length * 0.5, bz = s.z + Math.sin(s.rot) * s.length * 0.5;
+        spawn(puff, { x: bx + rr(-0.2, 0.2), y: 0.14, z: bz + rr(-0.3, 0.3), vx: -Math.cos(s.rot) * 0.4, life: rr(0.7, 1.3), s0: 0.35, s1: 1.1, a: 0.5 * Math.min(1, s.speed * 3), color: 0xf2fbff });
+      }
+    }
+    stepPool(glow, sdt); stepPool(puff, sdt);
+    flash.intensity *= Math.pow(0.002, sdt); shake *= Math.pow(0.01, sdt);
+    if (loop && clock > endAt + 7) build(R);
+  }
+  if (!skipRender) { placeCamera(wall); renderer.render(scene, camera); }
+}
+function frame(now) { const dt = Math.min(0.05, (now - last) / 1000); last = now; step(dt); requestAnimationFrame(frame); }
+
+/* ---------- controls ---------- */
+$('restart').onclick = () => { if (R) build(R); };
+$('pause').onclick = () => { paused = !paused; $('pause').textContent = paused ? 'Play' : 'Pause'; };
+const speeds = [1, 2, 4, 0.5];
+$('speed').onclick = () => { speed = speeds[(speeds.indexOf(speed) + 1) % speeds.length]; $('speed').textContent = `Speed ${speed}x`; };
+$('loop').onclick = () => { loop = !loop; $('loop').textContent = loop ? 'Loop on' : 'Loop off'; };
+$('sound').onclick = () => { $('sound').textContent = sfx.toggle() ? 'Sound on' : 'Sound off'; };
+function toggleBar() { $('bar').classList.toggle('hide'); }
+$('hide').onclick = toggleBar;
+window.addEventListener('keydown', e => { if (e.key === 'h' || e.key === 'H') toggleBar(); if (e.key === 'm' || e.key === 'M') $('sound').click(); if (e.key === ' ') { e.preventDefault(); $('pause').click(); } });
+$('file').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(txt => { try { const data = JSON.parse(txt); if (!data.shots || !data.placements) throw new Error('not a replay'); build(data); }
+    catch (err) { $('msg').style.display = 'block'; $('msg').textContent = 'That file is not a replay exported by export_replay.py.'; } });
+});
+
+/* test hook: advance the replay by a fixed number of seconds */
+window.__clock = () => clock;
+window.__advance = (secs, draw) => { skipRender = !draw; for (let i = 0, n = Math.round(secs * 30); i < n; i++) step(1 / 30); skipRender = false; if (draw !== null) step(0); };
+
+if (window.REPLAY) build(window.REPLAY); else $('msg').style.display = 'block';
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
