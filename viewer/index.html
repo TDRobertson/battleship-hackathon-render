@@ -52,6 +52,11 @@
     color: var(--dim); text-shadow: 0 1px 6px rgba(0,0,0,.8); transition: opacity .6s; padding: 0 12px; }
   #ai b { color: var(--ink); font-weight: 600; }
   #ai.off, body.opening #ai, body.cine #ai { opacity: 0; }
+  #start { top: 0; bottom: 0; display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: .6em;
+    background: rgba(5,8,15,.55); pointer-events: auto; cursor: pointer; padding: 24px; }
+  #start.on { display: flex; }
+  #start .go { font-size: clamp(22px, 5vmin, 44px); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+  #start .hint { font-size: clamp(12px, 2.2vmin, 17px); letter-spacing: .2em; text-transform: uppercase; color: var(--dim); }
   #msg { top: 40%; text-align: center; padding: 24px; font-size: 18px; display: none; }
 </style>
 </head>
@@ -66,6 +71,7 @@
 <div class="hud" id="card"><div class="kicker" id="kicker"></div><div class="title" id="title"></div><div class="sub" id="sub"></div></div>
 <div class="hud off" id="ai"></div>
 <div class="hud" id="msg">No replay found. Run <b>python scripts/export_replay.py</b>, or load a replay .json file below.</div>
+<div class="hud" id="start"><div class="go">Click to start</div><div class="hint">Plays with sound · or press any key</div></div>
 <div class="hud" id="bar">
   <button id="restart">Restart</button>
   <button id="pause">Pause</button>
@@ -1107,9 +1113,19 @@ $('file').addEventListener('change', e => {
 
 /* test hook: advance the replay by a fixed number of seconds */
 window.__clock = () => clock; window.__ships = () => ships.A.concat(ships.B).map(v => [v.team, v.type, v.x, v.z, v.rot]); window.__sfx = sfx;
-window.__advance = (secs, draw) => { skipRender = !draw; for (let i = 0, n = Math.round(secs * 30); i < n; i++) step(1 / 30); skipRender = false; if (draw !== null) step(0); };
+window.__advance = (secs, draw) => { if ($('start').classList.contains('on')) { $('start').classList.remove('on'); paused = false; } skipRender = !draw; for (let i = 0, n = Math.round(secs * 30); i < n; i++) step(1 / 30); skipRender = false; if (draw !== null) step(0); };
 
-if (window.REPLAY) build(window.REPLAY); else $('msg').style.display = 'block';
+/* Browsers only allow sound after a click or key press, so the match waits behind a start screen and that first
+   interaction both switches the sound on and starts the opening from the top. */
+function begin() {
+  if (!$('start').classList.contains('on')) return;
+  $('start').classList.remove('on');
+  if ($('sound').textContent === 'Sound off') $('sound').click();
+  paused = false; $('pause').textContent = 'Pause'; if (R) build(R);
+}
+if (window.REPLAY) { build(window.REPLAY); paused = true; $('start').classList.add('on'); } else $('msg').style.display = 'block';
+$('start').addEventListener('click', begin);
+window.addEventListener('keydown', e => { if ($('start').classList.contains('on')) { e.stopImmediatePropagation(); e.preventDefault(); begin(); } }, true);
 requestAnimationFrame(frame);
 })();
 </script>
