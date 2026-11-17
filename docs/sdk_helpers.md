@@ -152,6 +152,13 @@ Returns whether there are hit cells that have not been resolved into a sunk ship
 
 ## Inference
 
+Several sampling helpers default to a one-second `time_limit` for general use.
+That default exceeds the 0.5-second limit for a bot's entire shot decision.
+When calling them for shots, set a substantially shorter time limit
+and leave time for setup, other computations, and remote communication. The
+sampling limit is not a guarantee that the whole decision finishes within it;
+check your bot's timings using simulations and remote matches.
+
 `sdk.inference.possible_fleets(rules, observation, max_fleets=300, rng=None)`
 
 Returns complete alive-ship fleets that are consistent with known misses, sunk
@@ -197,7 +204,7 @@ has. It returns `(fleets, refilled_count)`.
 Converts a list of legal fleet hypotheses into a board-shaped occupancy
 heatmap. This is the final step in the incremental pipeline.
 
-`sdk.inference.FleetSamplePool(rules, max_samples=500, rng=None, time_limit=1.0)`
+`sdk.inference.FleetSamplePool(rules, max_samples=500, time_limit=1.0, rng=...)`
 
 Keeps a reusable pool of sampled fleet hypotheses. Call
 `pool.occupancy_heatmap(observation)` after each shot. The pool filters out

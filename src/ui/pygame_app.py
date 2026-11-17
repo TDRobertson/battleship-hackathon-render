@@ -9,6 +9,7 @@ import traceback
 from core.engine import GameEngine, InvalidAction
 from core.models import Player
 from runtime.bot_loading import build_bot
+from runtime.clocks import ACTION_TIMEOUT_SECONDS, PLACEMENT_TIMEOUT_SECONDS, ActionTimeout, call_with_timeout, wait_for_minimum_move
 from sdk.observation import ObservationState, result_to_public
 from core.rules import official_rules
 from ui.controller import PlacementController
@@ -55,12 +56,20 @@ def run_app(
     placement = PlacementController(rules)
     human_obs = ObservationState(rules)
     bot_obs = ObservationState(rules)
-    bot_placements = bot.place_ships(rules, rules.thinking_seconds)
     bot_shots: dict[tuple[int, int], str] = {}
     screen_name = "placement"
     message = "Place your fleet"
-    bot_remaining = rules.thinking_seconds
-    last_tick = time.monotonic()
+    try:
+        bot_placements = call_with_timeout(lambda: bot.place_ships(rules, PLACEMENT_TIMEOUT_SECONDS), PLACEMENT_TIMEOUT_SECONDS)
+    except ActionTimeout:
+        bot_placements = []
+        engine.forfeit(Player.B, "timeout during placement")
+        screen_name = "gameover"
+    except Exception as exc:
+        bot_placements = []
+        engine.forfeit(Player.B, f"bot failure during placement: {exc}")
+        screen_name = "gameover"
+    turn_started = time.monotonic()
     debug = DebugSettings()
     debug_cache = DebugLayerCache()
     theme = LIGHT_THEME
@@ -73,23 +82,20 @@ def run_app(
     running = True
     try:
         while running:
-            now = time.monotonic()
-            dt = now - last_tick
-            last_tick = now
             if screen_name == "battle":
                 if engine.active_player is Player.B and engine.winner is None:
-                    bot_remaining = max(0.0, bot_remaining - dt)
-                    if bot_remaining <= 0:
-                        engine.forfeit(Player.B, "timeout")
-                    else:
-                        try:
-                            shot = bot.choose_shot(bot_obs.snapshot(), bot_remaining)
-                            result = engine.fire(Player.B, int(shot[0]), int(shot[1]))
-                            bot_obs.apply_result(result_to_public(result))
-                            bot_shots[result.shot] = result.outcome.value
-                            message = f"Bot: {result.shot} {result.outcome.value}"
-                        except Exception as exc:
-                            engine.forfeit(Player.B, f"bot failure: {exc}")
+                    try:
+                        shot = call_with_timeout(lambda: bot.choose_shot(bot_obs.snapshot(), ACTION_TIMEOUT_SECONDS))
+                        wait_for_minimum_move(turn_started)
+                        result = engine.fire(Player.B, int(shot[0]), int(shot[1]))
+                        turn_started = time.monotonic()
+                        bot_obs.apply_result(result_to_public(result))
+                        bot_shots[result.shot] = result.outcome.value
+                        message = f"Bot: {result.shot} {result.outcome.value}"
+                    except ActionTimeout:
+                        engine.forfeit(Player.B, "timeout during shot")
+                    except Exception as exc:
+                        engine.forfeit(Player.B, f"bot failure: {exc}")
                 if engine.winner is not None:
                     screen_name = "gameover"
 
@@ -156,6 +162,7 @@ def run_app(
                                     engine.place_fleet(Player.A, placement.placements)
                                     engine.place_fleet(Player.B, bot_placements)
                                     screen_name = "battle"
+                                    turn_started = time.monotonic()
                                     message = "Your turn"
                                 except InvalidAction as exc:
                                     message = str(exc)
@@ -177,7 +184,9 @@ def run_app(
                         cell = target_geom.pixel_to_cell(pos)
                         if cell and human_obs.snapshot().available_shots()[cell]:
                             try:
+                                wait_for_minimum_move(turn_started)
                                 result = engine.fire(Player.A, *cell)
+                                turn_started = time.monotonic()
                                 human_obs.apply_result(result_to_public(result))
                                 message = f"You: {result.shot} {result.outcome.value}"
                             except InvalidAction as exc:
@@ -212,8 +221,8 @@ def run_app(
                 debug_geom = own_geom if debug.focus == "bot-target" else target_geom
                 draw_text(pygame, screen, "Own Board", (40, 80), 32, theme.text)
                 draw_text(pygame, screen, "Target Board", (460, 80), 32, theme.text)
-                draw_text(pygame, screen, "You Untimed", (40, 40), 26, theme.text)
-                draw_text(pygame, screen, f"Bot {bot_remaining:05.1f}s", (200, 40), 26, theme.text)
+                draw_text(pygame, screen, "You", (40, 40), 26, theme.text)
+                draw_text(pygame, screen, "Bot", (200, 40), 26, theme.text)
                 draw_text(pygame, screen, f"Active {engine.active_player.value}", (360, 40), 26, theme.text)
                 for button in _battle_buttons():
                     _button(pygame, screen, *button, theme=theme)

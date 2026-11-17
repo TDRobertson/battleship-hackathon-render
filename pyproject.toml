@@ -36,6 +36,9 @@ py-modules = [
 where = ["src"]
 include = ["app*", "battleship*", "bots*", "core*", "runtime*", "sdk*", "ui*"]
 
+[tool.setuptools.package-data]
+ui = ["spectator.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

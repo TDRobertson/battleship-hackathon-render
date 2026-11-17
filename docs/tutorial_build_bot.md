@@ -44,7 +44,9 @@ def choose_shot(self, observation, time_remaining):
 ```
 
 `place_ships` returns all ship placements. `choose_shot` returns one `(row, col)`
-target coordinate. The engine validates both.
+target coordinate. The engine validates both. By default, placement has a
+5-second limit and each shot has a 0.5-second limit; `time_remaining` gives the
+limit for that action. Remote deadlines include network time.
 
 Inside `choose_shot`, `observation` has:
 
@@ -143,15 +145,20 @@ can use the same building blocks without inheriting the same strategy.
 
 ```python
 from sdk.board import center_distance
-from sdk.inference import FleetSamplePool, hypothesis_reduction_scores
+from sdk.inference import FleetSamplePool, hypothesis_reduction_scores, occupancy_from_fleets
 from sdk.targeting import available_shots
 
 
-pool = FleetSamplePool(rules, max_samples=200, rng=self.rng)
+pool = FleetSamplePool(rules, max_samples=50, rng=self.rng, time_limit=0.1)
 fleets = pool.update(observation)
-heat = pool.occupancy_heatmap(observation)
+heat = occupancy_from_fleets(rules, fleets)
 info = hypothesis_reduction_scores(rules, fleets, available_shots(observation))
 ```
+
+The sampling limit leaves time for other work within the 0.5-second shot
+deadline; it does not guarantee that the whole decision will finish in time.
+Measure your bot and reduce the sample count or time limit if needed. Remote
+matches also include communication time in the deadline.
 
 Ideas you can implement quickly:
 

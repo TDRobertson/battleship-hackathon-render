@@ -8,5 +8,7 @@ after every accepted shot. There is no extra turn after a hit. Repeated shots ar
 illegal. Sinking feedback reveals the sunk slot and all cells occupied by that
 ship. A player wins by sinking every opposing ship.
 
-Each player has 120 seconds total for placement and firing decisions. A timeout
-or illegal submitted action is an immediate loss.
+Each bot has up to 5 seconds for placement and 0.5 seconds for each shot;
+there is no cumulative game clock. A timeout or illegal submitted action is an
+immediate loss of the current game, not necessarily the pairing. Remote action deadlines include network time. See
+[Remote LAN Matches](remote_play.md) for disconnects and series handling.

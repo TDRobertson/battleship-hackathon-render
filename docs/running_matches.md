@@ -6,7 +6,23 @@
 battleship simulate --games 20 --bot-a starter --bot-b hunt-target --seed 123
 ```
 
-Add `--verbose` to print every match result:
+The summary reports `avg_move_time` and `max_move_time` in seconds for each
+side, across all shot decisions in the run. The average is weighted by the
+number of moves; `n/a` means the side made no shot decisions. The timing includes
+failed or timed-out shot attempts, but excludes placement. With `--process`, it
+includes communication with the worker process. Placement has a 5-second limit,
+and each shot has a fresh 0.5-second limit; there is no cumulative game clock. Simulations and local
+round-robin tournaments run without the visual move delay. `--process` also
+isolates bots so a timed-out action can be terminated; in-process simulation
+stops waiting for a timed-out bot but cannot forcibly stop its code.
+For compatibility, CSV `a_remaining` and `b_remaining` fields remain present;
+they report the unused portion of each player's most recent action limit, not a
+game-wide balance. The bot `time_remaining` argument describes the current action's
+limit. The rules fields `placement_seconds` and `thinking_seconds` give the
+placement and shot limits respectively.
+
+Timeouts are printed for each affected game, including the bot that timed out,
+even without `--verbose`. Add `--verbose` to print every match result:
 
 ```console
 battleship simulate --games 5 --bot-a my_bot:MyAgent --bot-b hunt-target --verbose
@@ -33,7 +49,9 @@ save_match_summary_plot("results.csv", "results.png")
 battleship play --bot my_bot:MyAgent
 ```
 
-The human player is untimed. The bot still uses the official match clock.
+The human player is untimed. The bot has 5 seconds for placement and 0.5 seconds
+per shot; graphical moves are displayed at least 0.5 seconds apart without charging
+the display delay to the bot.
 During placement, use the buttons or `R` to rotate, `U` to undo, `T` to switch
 theme, and `Q` to quit.
 
@@ -99,8 +117,12 @@ battleship benchmark --games 100 --seed 2026 --bot starter-random --bot hunt-tar
 ```
 
 Each bot faces the same sequence of random target fleets. The command prints the
-average, minimum, and maximum shot count for each bot. Write per-game results to
-CSV for later analysis:
+average, minimum, and maximum shot count for each bot, plus average and maximum
+shot decision time in seconds across all moves. Placement is excluded from those
+statistics. Benchmark is target practice, with no cumulative game clock, but it
+enforces the 5-second placement limit and 0.5-second shot limit. A timed-out action
+stops the benchmark with an error. Write per-game shot counts to CSV for later
+analysis:
 
 ```console
 battleship benchmark --games 100 --seed 2026 --bot hunt-target --bot my_bot:MyAgent --csv shot-benchmark.csv
@@ -120,7 +142,8 @@ problems that in-process matches may hide.
 
 ## Local Competition Format
 
-A simple round-robin can be run with the `tournament` command:
+A simple local round-robin can be run with the `tournament` command. For the
+remote double-elimination format, see [Remote LAN Matches](remote_play.md):
 
 ```console
 battleship tournament --process --games 50 --seed 1 --csv tournament.csv --bot alice_bot:MyAgent --bot bob_bot:MyAgent --bot starter
@@ -175,17 +198,42 @@ Recommended event settings:
 For matches where competitors run bots on their own machines and connect to a
 host over the LAN, see `docs/remote_play.md`.
 
-The short version is:
+Start the server on the host laptop, then open `http://localhost:8765/` there
+to watch live games and replays:
 
 ```console
 battleship remote-server --host 0.0.0.0 --port 8765
+```
+
+Each competitor starts a client using the host's LAN address. For example, run
+these on the two competitors' machines:
+
+```console
 battleship remote-client --server http://HOST:8765 --name alice --bot my_bot:MyAgent
+battleship remote-client --server http://HOST:8765 --name bob --bot hunt-target
+```
+
+From the host or another machine on the LAN:
+
+```console
+battleship remote-list --server http://HOST:8765
 battleship remote-match --server http://HOST:8765 --bot-a alice --bot-b bob --games 5
 ```
+
+In another terminal, `battleship remote-matches --server http://HOST:8765`
+shows current games and wins. `remote-stop` stops a series by ID, and
+`remote-unregister` removes a player by ID. Each remote placement must complete
+within 5 seconds and each shot within 0.5 seconds, including network time; heartbeats independently
+mark disconnected clients offline after 15 seconds by default. See
+[Remote LAN Matches](remote_play.md) for reconnection, timeout behavior, and
+all command examples.
 
 Organizer wrappers:
 
 ```console
 python scripts/organizer_remote_server.py --port 8765
-python scripts/organizer_remote_round_robin.py --server http://HOST:8765 --bots-file examples/bots.txt
+python scripts/organizer_remote_round_robin.py --server http://HOST:8765 --bots-file remote-players.txt
 ```
+
+For the remote round robin, the bots file must contain registered player names
+or IDs, one per line.

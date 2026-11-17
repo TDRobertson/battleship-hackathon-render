@@ -90,3 +90,27 @@ def test_wrap_text_splits_long_unspaced_words():
 
     assert len(lines) > 1
     assert all(font.size(line)[0] <= max_width for line in lines)
+
+
+def test_graphical_game_paces_both_human_and_bot_moves(monkeypatch):
+    pygame = pytest.importorskip("pygame")
+    import ui.pygame_app as app
+
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    monkeypatch.setenv("SDL_AUDIODRIVER", "dummy")
+    monkeypatch.setattr(app, "_log_ui", lambda message: None)
+    waits, limits = [], []
+    monkeypatch.setattr(app, "wait_for_minimum_move", lambda started: waits.append(started))
+    call = app.call_with_timeout
+    def timed(action, timeout=0.5):
+        limits.append(timeout)
+        return call(action, timeout)
+    monkeypatch.setattr(app, "call_with_timeout", timed)
+    click = lambda pos: pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": pos})
+    first_frame = [click((65, 125 + 42 * row)) for row in range(5)]
+    first_frame += [click((70, 620)), click((465, 140))]
+    frames = iter([first_frame, [pygame.event.Event(pygame.QUIT)]])
+    monkeypatch.setattr(pygame.event, "get", lambda: next(frames, [pygame.event.Event(pygame.QUIT)]))
+    app.run_app(seed=1, bot_name="starter")
+    assert len(waits) == 2
+    assert limits == [5.0, 0.5]

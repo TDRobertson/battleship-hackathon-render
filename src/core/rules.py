@@ -11,8 +11,9 @@ class Rules:
     rows: int = 10
     cols: int = 10
     fleet: tuple[int, ...] = (5, 4, 3, 3, 2)
-    thinking_seconds: float = 120.0
+    thinking_seconds: float = 0.5
     protocol_version: int = 1
+    placement_seconds: float = 5.0
 
     def ship_length(self, slot: int) -> int:
         if slot < 0 or slot >= len(self.fleet):

@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Remote Battleship matches</title>
+<style>
+:root { color-scheme: dark; font-family: system-ui, sans-serif; background: #101b2a; color: #edf4fb; }
+body { max-width: 1100px; margin: auto; padding: 24px; }
+h1 { margin: 0 0 6px; } p { color: #adc1d4; }
+.toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 20px 0; }
+select, button { font: inherit; padding: 8px 12px; color: inherit; background: #263b50; border: 1px solid #526b80; border-radius: 5px; }
+button { cursor: pointer; } button:disabled { opacity: .5; cursor: default; }
+input[type=range] { flex: 1; min-width: 120px; }
+.boards { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 32px; }
+.boards[hidden] { display: none; }
+.board h2 { margin: 0 0 4px; font-size: 1.15rem; overflow-wrap: anywhere; }
+.board p { margin: 0 0 12px; }
+.grid { display: grid; gap: 3px; max-width: 440px; }
+.cell { aspect-ratio: 1; display: grid; place-items: center; background: #28445b; border-radius: 3px; font-weight: bold; }
+.coordinate { background: transparent; color: #adc1d4; font-size: .8rem; }
+.ship { background: #407d9e; } .miss { background: #5a788c; } .hit { background: #cc653e; } .sunk { background: #741925; }
+.legend span { margin-right: 16px; } .legend b { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 5px; }
+#status { min-height: 1.5em; } #connection { color: #f3c578; }
+.tournament { border: 1px solid #37556d; background: #15283b; border-radius: 10px; padding: 18px; margin: 24px 0; }
+.tournament-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.tournament-head h2 { margin: 0; } .tournament-head select { max-width: 100%; }
+.tournament-summary { margin: 10px 0 18px; }
+.brackets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; overflow-anchor: none; }
+.bracket { min-width: 0; background: #101f2e; border-radius: 8px; padding: 14px; }
+.bracket h3 { margin: 0 0 12px; } .bracket h4 { color: #adc1d4; margin: 16px 0 8px; font-size: .85rem; text-transform: uppercase; letter-spacing: .05em; }
+.bracket.finals { grid-column: 1 / -1; } .empty { color: #8ea6b9; font-size: .9rem; }
+.pair { width: 100%; text-align: left; padding: 12px; margin: 0 0 8px; background: #1d3348; border: 1px solid #3c5a71; border-radius: 7px; }
+.pair:hover, .pair:focus-visible { border-color: #8dc8eb; } .pair.selected { border-color: #83d6c0; box-shadow: inset 3px 0 #83d6c0; }
+.pair-meta { display: flex; justify-content: space-between; color: #b2c7d8; font-size: .8rem; margin-bottom: 8px; gap: 8px; }
+.pair-player { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; padding: 3px 0; overflow-wrap: anywhere; }
+.pair-player strong { color: #a7e8d0; } .pair-player .score { font-weight: 700; flex-shrink: 0; }
+.pair-result { display: block; color: #a7e8d0; font-size: .8rem; margin-top: 7px; } .pair-error { color: #f3c578; }
+.bye { font-size: .86rem; color: #b2c7d8; padding: 6px 2px; }
+#pair-context { margin-bottom: 0; } #all-matches { margin-left: 8px; }
+@media (max-width: 700px) { body { padding: 16px; } .brackets { grid-template-columns: 1fr; } .bracket.finals { grid-column: auto; } }
+</style>
+</head>
+<body>
+<h1>Remote matches</h1>
+<p>Shots are shown on each player's target board. Ships are visible during matches unless hidden by the host.</p>
+<p id="connection" role="status"></p>
+<section class="tournament" aria-labelledby="tournament-heading">
+  <div class="tournament-head"><h2 id="tournament-heading">Tournament</h2><label>Tournament <select id="tournaments" aria-label="Tournament"></select></label></div>
+  <p class="tournament-summary" id="tournament-summary">No tournaments yet.</p>
+  <div class="brackets" id="brackets"></div>
+</section>
+<p id="pair-context">Showing recent matches. Select a pairing to see its rounds.</p>
+<div class="toolbar">
+<label for="matches">Match / round</label><select id="matches" aria-label="Match or round"></select>
+<button id="live">Live</button><button id="replay">Replay</button>
+<button id="ships" type="button" aria-label="Show ship locations" aria-pressed="true">Hide ships</button>
+<button id="all-matches" hidden>All recent matches</button>
+<label for="position">Turn</label><input id="position" type="range" min="0" value="0" aria-label="Replay turn">
+<span id="turn">0 / 0</span>
+</div>
+<p id="status" role="status">Waiting for a remote match…</p>
+<div class="boards" id="boards"></div>
+<p class="legend"><span><b class="ship"></b>Ship</span><span><b class="miss"></b>Miss</span><span><b class="hit"></b>Hit</span><span><b class="sunk"></b>Sunk</span></p>
+<script>
+const select = document.querySelector('#matches'), status = document.querySelector('#status');
+const boards = document.querySelector('#boards'), range = document.querySelector('#position');
+const turn = document.querySelector('#turn'), replay = document.querySelector('#replay');
+const live = document.querySelector('#live'), connection = document.querySelector('#connection');
+const ships = document.querySelector('#ships');
+const tournamentSelect = document.querySelector('#tournaments'), tournamentSummary = document.querySelector('#tournament-summary');
+const brackets = document.querySelector('#brackets'), pairContext = document.querySelector('#pair-context');
+const allMatches = document.querySelector('#all-matches');
+const VISUAL_INTERVAL_MS = 500;
+let matches = [], selected = null, following = true, mode = 'live', position = 0, timer = null, fetching = false;
+let tournaments = [], tournamentId = null, selectedPair = null, bracketSnapshot = '', serverClockOffset = 0;
+let liveTimer = null, nextLiveAt = 0, boardViews = null, matchOptionsSnapshot = '';
+let showShips = true;
+try { showShips = localStorage.getItem('battleship-show-ships') !== 'false'; } catch (_) {}
+function current() { return matches.find(m => m.id === selected); }
+function stopReplay() { clearInterval(timer); timer = null; replay.textContent = 'Replay'; }
+function stopLiveQueue() { clearTimeout(liveTimer); liveTimer = null; }
+function chooseMatch(id, catchUp) {
+  stopReplay(); stopLiveQueue(); selected = id; mode = 'live';
+  const match = current();
+  position = catchUp && match ? match.shots.length : 0;
+  nextLiveAt = performance.now() + (position ? VISUAL_INTERVAL_MS : 0);
+}
+function scheduleLive() {
+  if (liveTimer !== null || mode !== 'live') return;
+  const match = current();
+  if (!match) return;
+  const index = matches.findIndex(item => item.id === selected);
+  const hasNextMatch = following && match.status !== 'playing' && index > 0;
+  if (position >= match.shots.length && !hasNextMatch) return;
+  liveTimer = setTimeout(() => {
+    liveTimer = null;
+    const active = current();
+    if (!active || mode !== 'live') return;
+    if (position < active.shots.length) {
+      position++;
+      nextLiveAt = performance.now() + VISUAL_INTERVAL_MS;
+      draw();
+    } else {
+      const activeIndex = matches.findIndex(item => item.id === selected);
+      if (following && active.status !== 'playing' && activeIndex > 0) {
+        chooseMatch(matches[activeIndex - 1].id, false);
+        select.value = selected;
+        draw();
+      }
+    }
+    scheduleLive();
+  }, Math.max(0, nextLiveAt - performance.now()));
+}
+function playerName(tournament, id) { return tournament.entrants[id]?.name || id; }
+function updateTournamentSummary() {
+  const tournament = tournaments.find(item => item.id === tournamentId);
+  if (!tournament) { tournamentSummary.textContent = 'No tournaments yet.'; return; }
+  const champion = tournament.champion_id && playerName(tournament, tournament.champion_id);
+  if (champion) tournamentSummary.textContent = `Champion: ${champion}`;
+  else if (tournament.status === 'stopped') tournamentSummary.textContent = `Tournament stopped: ${tournament.reason || 'interrupted'}`;
+  else if (tournament.break_until) {
+    const seconds = Math.max(0, Math.ceil((tournament.break_until * 1000 - Date.now() - serverClockOffset) / 1000));
+    tournamentSummary.textContent = `Break · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} remaining`;
+  } else tournamentSummary.textContent = `Live · Wave ${tournament.wave} · ${Object.keys(tournament.entrants).length} players`;
+}
+function selectPair(tournament, pair) {
+  tournamentId = tournament.id; selectedPair = pair.id; matches = []; following = true;
+  chooseMatch(null, false); bracketSnapshot = ''; renderTournaments(); draw(); refresh();
+}
+function renderTournaments() {
+  const tournament = tournaments.find(item => item.id === tournamentId);
+  updateTournamentSummary();
+  const snapshot = JSON.stringify([tournaments, tournamentId, selectedPair]);
+  if (snapshot === bracketSnapshot) return;
+  bracketSnapshot = snapshot;
+  const focusedPair = document.activeElement?.dataset?.pairId;
+  tournamentSelect.replaceChildren();
+  if (!tournaments.length) {
+    const option = document.createElement('option'); option.textContent = 'No tournaments'; tournamentSelect.append(option);
+    tournamentSelect.disabled = true; tournamentSummary.textContent = 'No tournaments yet.'; brackets.replaceChildren(); return;
+  }
+  tournamentSelect.disabled = false;
+  for (const item of tournaments) {
+    const option = document.createElement('option'); option.value = item.id;
+    option.textContent = `${item.status === 'running' ? 'Live' : item.status === 'finished' ? 'Finished' : 'Stopped'} · seed ${item.seed} · ${item.id.slice(0, 8)}`;
+    tournamentSelect.append(option);
+  }
+  if (!tournament) return;
+  tournamentSelect.value = tournament.id;
+  brackets.replaceChildren();
+  for (const [kind, title] of [['winners', 'Winners bracket'], ['losers', 'Losers bracket'], ['finals', 'Finals']]) {
+    const section = document.createElement('section'); section.className = `bracket ${kind}`;
+    const heading = document.createElement('h3'); heading.textContent = title; section.append(heading);
+    if (kind === 'losers' && tournament.phase === 'winners' && tournament.status === 'running') {
+      const players = Object.values(tournament.entrants).filter(player => player.losses === 1);
+      const note = document.createElement('p'); note.className = 'empty';
+      note.textContent = players.length ? `Waiting for the winners-bracket finalist: ${players.map(player => player.name).join(', ')}.` : 'Waiting for the winners-bracket finalist.';
+      section.append(note);
+    }
+    if (kind === 'winners' && tournament.finalist_id) {
+      const note = document.createElement('p'); note.className = 'bye';
+      note.textContent = `Winners-bracket finalist: ${playerName(tournament, tournament.finalist_id)}`;
+      section.append(note);
+    }
+    const pairs = tournament.pairings.filter(pair => kind === 'finals' ? pair.bracket === 'final' || pair.final_reset : pair.bracket === kind && !pair.final_reset);
+    const byes = tournament.byes.filter(bye => bye.bracket === kind);
+    const waiting = tournament.waiting?.bracket === kind ? tournament.waiting : null;
+    const disqualifications = (tournament.disqualifications || []).filter(item => item.bracket === kind);
+    const waves = [...new Set([...pairs.map(pair => pair.wave), ...byes.map(bye => bye.wave), ...disqualifications.map(item => item.wave), ...(waiting ? [tournament.wave] : [])])].sort((a, b) => a - b);
+    if (!waves.length && !(kind === 'losers' && tournament.phase === 'winners' && tournament.status === 'running')) { const empty = document.createElement('div'); empty.className = 'empty'; empty.textContent = 'No pairings yet.'; section.append(empty); }
+    for (const wave of waves) {
+      const waveHeading = document.createElement('h4'); waveHeading.textContent = `Wave ${wave}`; section.append(waveHeading);
+      for (const pair of pairs.filter(item => item.wave === wave)) {
+        const card = document.createElement('button'); card.type = 'button'; card.className = `pair${pair.id === selectedPair ? ' selected' : ''}`; card.dataset.pairId = pair.id;
+        const meta = document.createElement('span'); meta.className = 'pair-meta';
+        const stage = document.createElement('span'); stage.textContent = `${pair.final_reset ? 'Final reset' : pair.bracket === 'final' ? 'Final' : 'Pairing'} · best of ${pair.games || 5}`;
+        const progress = `${pair.completed}/${pair.games || 5} games`;
+        const state = document.createElement('span'); state.textContent = pair.status === 'playing' ? `Live · ${progress}` : pair.status === 'reconnecting' ? `Waiting for ${playerName(tournament, pair.reconnecting_bot)} to reconnect` : pair.status === 'finished' ? `Finished · ${progress}` : pair.status === 'stopped' ? `Stopped · ${progress}` : 'Waiting to start';
+        meta.append(stage, state); card.append(meta);
+        for (const [id, wins] of [[pair.bot_a, pair.a_wins], [pair.bot_b, pair.b_wins]]) {
+          const row = document.createElement('span'); row.className = 'pair-player';
+          const name = document.createElement(id === pair.winner ? 'strong' : 'span'); name.textContent = playerName(tournament, id);
+          const score = document.createElement('span'); score.className = 'score'; score.textContent = wins;
+          row.append(name, score); card.append(row);
+        }
+        const result = document.createElement('span'); result.className = 'pair-result';
+        if (pair.status === 'finished') {
+          const winner = playerName(tournament, pair.winner), loser = playerName(tournament, pair.loser);
+          if (pair.advancement_pending) result.textContent = `${winner} won · advancement pending`;
+          else if (!pair.winner) result.textContent = `Neither player advances · ${pair.decision_reason || 'pairing forfeited'}`;
+          else if (pair.decision_reason) result.textContent = `${winner} advances · ${pair.decision_reason}`;
+          else if (pair.bracket === 'winners') result.textContent = `${winner} advances · ${loser} moves to losers`;
+          else if (pair.bracket === 'final' && (pair.winner === pair.bot_a ? pair.a_losses_before : pair.b_losses_before) === 1) result.textContent = `${winner} forces a final reset`;
+          else result.textContent = `${winner} ${tournament.champion_id === pair.winner ? 'wins the tournament' : 'advances'} · ${loser} eliminated`;
+        } else if (pair.status === 'stopped') { result.classList.add('pair-error'); result.textContent = pair.reason || 'Series interrupted'; }
+        else result.textContent = pair.rounds.length ? 'Select to watch games' : 'Select to follow this pairing';
+        card.append(result); card.addEventListener('click', () => selectPair(tournament, pair)); section.append(card);
+      }
+      for (const bye of byes.filter(item => item.wave === wave)) {
+        const note = document.createElement('div'); note.className = 'bye'; note.textContent = bye.reason ? `${playerName(tournament, bye.bot_id)}: ${bye.reason}` : bye.advancement_pending ? `${playerName(tournament, bye.bot_id)} has a bye · advancement pending` : `${playerName(tournament, bye.bot_id)} advances with a bye`; section.append(note);
+      }
+      for (const item of disqualifications.filter(entry => entry.wave === wave)) {
+        const note = document.createElement('div'); note.className = 'bye'; note.textContent = `${playerName(tournament, item.bot_id)}: ${item.reason}`; section.append(note);
+      }
+      if (waiting && wave === tournament.wave) {
+        const note = document.createElement('div'); note.className = 'bye'; note.textContent = `${playerName(tournament, waiting.bot_id)} is waiting for an opponent`; section.append(note);
+      }
+    }
+    brackets.append(section);
+  }
+  if (focusedPair) [...brackets.querySelectorAll('.pair')].find(button => button.dataset.pairId === focusedPair)?.focus({preventScroll: true});
+}
+function ensureBoards(match) {
+  if (boardViews && boardViews.rows === match.rows && boardViews.cols === match.cols) return;
+  const views = {rows: match.rows, cols: match.cols};
+  const sections = [];
+  for (const player of ['A', 'B']) {
+    const section = document.createElement('section'); section.className = 'board';
+    const heading = document.createElement('h2'), subtitle = document.createElement('p');
+    const grid = document.createElement('div'); grid.className = 'grid'; grid.style.gridTemplateColumns = `repeat(${match.cols + 1}, 1fr)`;
+    grid.append(document.createElement('div'));
+    for (let col = 0; col < match.cols; col++) {
+      const label = document.createElement('div'); label.className = 'cell coordinate'; label.textContent = col + 1; grid.append(label);
+    }
+    const cells = [];
+    for (let row = 0; row < match.rows; row++) {
+      const label = document.createElement('div'); label.className = 'cell coordinate'; label.textContent = String.fromCharCode(65 + row); grid.append(label);
+      cells[row] = [];
+      for (let col = 0; col < match.cols; col++) {
+        const cell = document.createElement('div'); cell.className = 'cell'; cells[row][col] = cell; grid.append(cell);
+      }
+    }
+    section.append(heading, subtitle, grid); sections.push(section);
+    views[player] = {heading, subtitle, cells};
+  }
+  boards.replaceChildren(...sections);
+  boardViews = views;
+}
+function draw() {
+  const match = current();
+  if (!match) {
+    boards.hidden = !boardViews; boards.style.visibility = 'hidden';
+    status.textContent = selectedPair ? 'Waiting for this pairing to start…' : 'Waiting for a remote match…';
+    range.max = 0; range.value = 0; turn.textContent = '0 / 0'; live.disabled = replay.disabled = range.disabled = ships.disabled = true;
+    ships.textContent = showShips ? 'Hide ships' : 'Show ships'; ships.setAttribute('aria-pressed', String(showShips));
+    ships.title = 'Select a match to toggle ship locations'; return;
+  }
+  boards.hidden = false;
+  boards.style.visibility = '';
+  ensureBoards(match);
+  live.disabled = replay.disabled = range.disabled = false;
+  position = Math.min(position, match.shots.length);
+  const shipsAvailable = Boolean(match.fleets && (match.live_ships_visible || (match.status !== 'playing' && (mode !== 'live' || position === match.shots.length))));
+  ships.disabled = !shipsAvailable;
+  ships.setAttribute('aria-pressed', String(showShips));
+  ships.textContent = shipsAvailable ? (showShips ? 'Hide ships' : 'Show ships') : 'Ships hidden by host';
+  ships.title = shipsAvailable ? 'Toggle ship locations for this viewer' : 'Ship locations are unavailable during this match';
+  range.max = match.shots.length; range.value = position;
+  const turnLabel = `${position} / ${match.shots.length}`;
+  if (turn.textContent !== turnLabel) turn.textContent = turnLabel;
+  const last = match.shots[position - 1];
+  let message = position === 0 ? (match.status !== 'playing' ? 'No shots at this turn.' : 'Waiting for the first shot.') : `${last.player === 'A' ? match.bot_a : match.bot_b} fired at ${String.fromCharCode(65 + last.row)}${last.col + 1}: ${last.outcome}.`;
+  if (position === match.shots.length && match.status !== 'playing') message += match.winner ? ` Winner: ${match.winner === 'A' ? match.bot_a : match.bot_b} (${match.reason}).` : ` ${match.reason}.`;
+  else if (position === match.shots.length && match.status === 'playing') message += ' Match in progress.';
+  if (status.textContent !== message) status.textContent = message;
+  for (const player of ['A', 'B']) {
+    const cells = Array.from({length: match.rows}, () => Array(match.cols).fill(''));
+    if (showShips && shipsAvailable) {
+      const target = player === 'A' ? 'B' : 'A';
+      for (const [row, col] of (match.fleets?.[target] || [])) cells[row][col] = 'ship';
+    }
+    for (const shot of match.shots.slice(0, position)) {
+      if (shot.player !== player) continue;
+      cells[shot.row][shot.col] = shot.outcome === 'miss' ? 'miss' : 'hit';
+      for (const [row, col] of shot.sunk_cells) cells[row][col] = 'sunk';
+    }
+    const view = boardViews[player];
+    const heading = `${player === 'A' ? match.bot_a : match.bot_b} · ${player}`;
+    const subtitle = `Shots at ${player === 'A' ? match.bot_b : match.bot_a}`;
+    if (view.heading.textContent !== heading) view.heading.textContent = heading;
+    if (view.subtitle.textContent !== subtitle) view.subtitle.textContent = subtitle;
+    for (let row = 0; row < match.rows; row++) {
+      for (let col = 0; col < match.cols; col++) {
+        const cell = view.cells[row][col], value = cells[row][col], className = `cell ${value}`;
+        if (cell.className !== className) {
+          cell.className = className;
+          cell.textContent = value === 'miss' ? '·' : value === 'hit' || value === 'sunk' ? '×' : '';
+          cell.title = `${String.fromCharCode(65 + row)}${col + 1}: ${value || 'unknown'}`;
+        }
+      }
+    }
+  }
+}
+async function refresh() {
+  if (fetching) return;
+  fetching = true;
+  const requestedPair = selectedPair;
+  try {
+    const matchUrl = requestedPair ? `/api/spectator/matches?pair_id=${encodeURIComponent(requestedPair)}` : '/api/spectator/matches';
+    const [response, tournamentResponse] = await Promise.all([fetch(matchUrl, {cache: 'no-store'}), fetch('/api/spectator/tournaments', {cache: 'no-store'})]);
+    if (!response.ok || !tournamentResponse.ok) throw new Error('server unavailable');
+    const [matchData, tournamentData] = await Promise.all([response.json(), tournamentResponse.json()]);
+    if (typeof tournamentData.server_time === 'number') serverClockOffset = tournamentData.server_time * 1000 - Date.now();
+    tournaments = tournamentData.tournaments;
+    if (!tournaments.some(t => t.id === tournamentId)) tournamentId = tournaments[0]?.id || null;
+    renderTournaments();
+    if (requestedPair !== selectedPair) return;
+    matches = matchData.matches;
+    if (!matches.some(m => m.id === selected)) { following = true; chooseMatch(matches[0]?.id || null, true); }
+    const tournament = tournaments.find(t => t.id === tournamentId);
+    const pair = tournament?.pairings.find(item => item.id === selectedPair);
+    const context = pair ? `${playerName(tournament, pair.bot_a)} vs ${playerName(tournament, pair.bot_b)} · Select a round to watch or replay.` : 'Showing recent matches. Select a pairing to see its rounds.';
+    if (pairContext.textContent !== context) pairContext.textContent = context;
+    allMatches.hidden = !selectedPair;
+    const options = matches.map(match => {
+      let label;
+      if (pair) {
+        const round = pair.rounds.find(item => item.id === match.id);
+        label = `Round ${match.game} · ${match.status === 'playing' ? 'Live' : round?.winner ? `${playerName(tournament, round.winner)} won` : match.status}`;
+      } else label = `${match.bot_a} vs ${match.bot_b} · ${match.match_id} · ${match.status}`;
+      return {id: match.id, label};
+    });
+    const optionSnapshot = JSON.stringify([options, selectedPair]);
+    if (optionSnapshot !== matchOptionsSnapshot) {
+      matchOptionsSnapshot = optionSnapshot;
+      select.replaceChildren();
+      if (!options.length) { const option = document.createElement('option'); option.textContent = selectedPair ? 'No rounds yet' : 'No matches yet'; select.append(option); }
+      for (const item of options) {
+        const option = document.createElement('option'); option.value = item.id; option.textContent = item.label; select.append(option);
+      }
+    }
+    if (selected) select.value = selected;
+    connection.textContent = ''; draw(); scheduleLive();
+  } catch (_) { connection.textContent = 'Connection lost. Reconnecting…'; }
+  finally { fetching = false; }
+}
+tournamentSelect.addEventListener('change', () => { tournamentId = tournamentSelect.value; selectedPair = null; matches = []; following = true; chooseMatch(null, false); bracketSnapshot = ''; renderTournaments(); draw(); refresh(); });
+allMatches.addEventListener('click', () => { selectedPair = null; matches = []; following = true; chooseMatch(null, false); bracketSnapshot = ''; renderTournaments(); draw(); refresh(); });
+select.addEventListener('change', () => { following = false; chooseMatch(select.value, true); draw(); scheduleLive(); });
+ships.addEventListener('click', () => {
+  showShips = !showShips;
+  try { localStorage.setItem('battleship-show-ships', String(showShips)); } catch (_) {}
+  draw();
+});
+live.addEventListener('click', () => {
+  if ((selectedPair || following) && matches.length) { following = true; chooseMatch(matches[0].id, true); }
+  else chooseMatch(selected, true);
+  if (selected) select.value = selected;
+  draw(); scheduleLive();
+});
+range.addEventListener('input', () => { mode = 'replay'; following = false; stopLiveQueue(); stopReplay(); position = Number(range.value); draw(); });
+replay.addEventListener('click', () => {
+  if (timer) { stopReplay(); return; }
+  mode = 'replay'; following = false; stopLiveQueue(); position = 0; draw(); replay.textContent = 'Pause';
+  timer = setInterval(() => { const match = current(); if (!match || position >= match.shots.length) { stopReplay(); return; } position++; draw(); }, VISUAL_INTERVAL_MS);
+});
+refresh(); setInterval(refresh, VISUAL_INTERVAL_MS); setInterval(updateTournamentSummary, 1000);
+</script>
+</body>
+</html>

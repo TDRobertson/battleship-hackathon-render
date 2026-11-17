@@ -13,7 +13,9 @@ touch, but they may not overlap.
 
 Players alternate shots. A shot returns `miss`, `hit`, or `sunk`. A sunk result
 reveals the full sunk ship. Repeated shots, illegal placements, bot crashes, and
-timeouts lose immediately. See `docs/rules.md` for the complete rules summary.
+timeouts lose the current game immediately. Each bot has 5 seconds for placement
+and 0.5 seconds for each shot, with no cumulative game clock. See `docs/rules.md`
+for the complete rules summary.
 
 ## Installation
 
@@ -118,6 +120,18 @@ battleship simulate --bot-a my_bot:RandomStarterBot --bot-b hunt-target --games 
 Then edit `my_bot.py`. Your first useful changes usually belong in
 `place_ships` or `choose_shot`.
 
+For LAN matches, start `battleship remote-server` on the host and open
+`http://localhost:8765/` there to watch. Competitors connect with
+`battleship remote-client`; the host can list players with `remote-list` and
+running series with `remote-matches`. Start a double-elimination tournament with
+`battleship tournament --server http://HOST:8765`. Remote placement has a
+5-second limit and each shot has a 0.5-second limit. See [Remote LAN Matches](docs/remote_play.md) for setup,
+reconnection, timeouts, and organizer commands.
+
+To try the live tournament dashboard with nine local bots, run
+`battleship demo-tournament` and open the printed URL. Add `--port 8765` to use
+`http://localhost:8765/`.
+
 Run tests before submitting or sharing changes:
 
 ```console
@@ -161,7 +175,8 @@ class MyAgent(Agent):
 
 `observation` is a public snapshot of your target board. It contains masks for
 `misses`, unresolved `hits`, `sunk` cells, and `ships_alive`. It never reveals
-unhit enemy ship cells.
+unhit enemy ship cells. `time_remaining` is the per-action limit: normally 5
+seconds for placement and 0.5 seconds for a shot. Remote matches include network time.
 
 ## Built-In Bots
 
@@ -186,7 +201,7 @@ src/
 |-- core/                 # Authoritative rules and engine
 |-- runtime/              # Match runner and subprocess worker
 |-- sdk/                  # Neutral helpers for observations, placement, inference, validation
-`-- ui/                   # PyGame human-vs-bot app
+`-- ui/                   # PyGame human-vs-bot app and spectator dashboard
 
 examples/
 |-- EXAMPLES.md           # Example snippet overview
