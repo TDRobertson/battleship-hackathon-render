@@ -4,6 +4,9 @@ Two Battleship bots play each other, and this project turns the match into a
 naval battle you can watch: fleets sail in, shells arc across the water, ships
 burn and sink.
 
+**[Watch it live](https://tdrobertson.github.io/battleship-hackathon-render/viewer/)**
+(click **Sound** once it loads).
+
 ![Aerial view of a match in progress](docs/images/aerial.png)
 
 It started as a club hackathon where members wrote Battleship bots and ran them
@@ -115,6 +118,14 @@ ways:
 
 To write a bot, see the [hackathon kit guide](docs/hackathon_kit.md) and
 [`docs/tutorial_build_bot.md`](docs/tutorial_build_bot.md).
+
+### Hosting
+
+The live link is served by GitHub Pages straight from the `main` branch
+(Settings > Pages > Deploy from a branch > `main`, `/ (root)`), so every push
+updates it. The empty `.nojekyll` file tells GitHub to serve the files as they
+are. A fork gets its own link at
+`https://<username>.github.io/<repo>/viewer/` once Pages is turned on.
 
 ## Using the viewer
 
