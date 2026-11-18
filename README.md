@@ -176,6 +176,7 @@ feel:
 
 | Constant | Default | Effect |
 | --- | --- | --- |
+| `PACE` | `0.85` | Overall speed of everything: opening, ships, shells, effects. `1` is the original pace. |
 | `TARGET_BATTLE` | `70` | Target length of the battle in seconds; shot pacing is scaled to fit, within limits that keep roughly one shell in the air at a time. |
 | `OPENER` | `8.0` | Length of the cinematic opening in seconds. `0` skips straight to the aerial view. |
 | `CINE_CHANCE` | `0.45` | Chance that a sinking gets a slow-motion close-up. The last one always does. |

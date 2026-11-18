@@ -109,6 +109,7 @@ const $ = id => document.getElementById(id);
 if (!window.THREE) { $('msg').style.display = 'block'; $('msg').textContent = 'Could not load the 3D library (needs an internet connection).'; return; }
 
 /* ---------- constants ---------- */
+const PACE = 0.85;           // overall speed of the whole show; 1 is the original pace, lower is slower
 const OPENER = 8.0;         // length of the cinematic opening before the aerial view (0 turns it off)
 const GAP = 3, INTRO = OPENER + 8.5, FLIGHT = 0.85, TARGET_BATTLE = 70, CRUISE = 1.5;
 const CINE_CHANCE = 0.45;   // chance that a sinking gets a slow-motion close-up (the final one always does)
@@ -1208,14 +1209,14 @@ function step(dt) {
     timeScale += ((slowed ? CINE_SLOW : 1) - timeScale) * Math.min(1, dt * 12);
     focusW = Math.max(0, Math.min(1, focusW + (active ? dt / 0.4 : -dt / 0.55)));
     document.body.classList.toggle('cine', active); document.body.classList.toggle('opening', clock < OPENER - 1); sfx.view(focusW, timeScale);
-    clock += dt * speed * timeScale; simDt = dt * speed * timeScale;   // set before timed callbacks run, since they emit per second of match time
+    clock += dt * speed * PACE * timeScale; simDt = dt * speed * PACE * timeScale;   // set before timed callbacks run, since they emit per second of match time
     while (evIndex < events.length && events[evIndex].t <= clock) events[evIndex++].fn();
     for (let i = tweens.length - 1; i >= 0; i--) {
       const tw = tweens[i]; if (clock < tw.start) continue;
       const k = Math.min(1, (clock - tw.start) / tw.dur); tw.update(k);
       if (k >= 1) { tweens.splice(i, 1); if (tw.done) tw.done(); }
     }
-    const sdt = dt * speed * timeScale; simDt = sdt;
+    const sdt = dt * speed * PACE * timeScale; simDt = sdt;
     for (const e of emitters) {
       if (!e.on) continue; e.acc += sdt;
       while (e.acc > 0.11) { e.acc -= 0.11;
