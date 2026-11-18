@@ -112,7 +112,7 @@ if (!window.THREE) { $('msg').style.display = 'block'; $('msg').textContent = 'C
 const PACE = 0.85;           // overall speed of the whole show; 1 is the original pace, lower is slower
 const OPENER = 8.0;         // length of the cinematic opening before the aerial view (0 turns it off)
 const GAP = 3, INTRO = OPENER + 8.5, FLIGHT = 0.85, TARGET_BATTLE = 70, CRUISE = 1.5;
-const CINE_CHANCE = 0.45;   // chance that a sinking gets a slow-motion close-up (the final one always does)
+const CINE_CHANCE = 1;      // chance that a sinking gets a slow-motion close-up; 1 = every ship that goes down
 const CINE_SLOW = 0.38;     // time scale during a close-up
 const PLANES = 3;           // aircraft each carrier launches
 const TEAM = {
@@ -856,7 +856,7 @@ function build(replay) {
     const launch = t, impact = launch + FLIGHT, final = i === R.shots.length - 1;
     /* a carrier attacks with one of its aircraft when one is free; otherwise it fires like any other ship */
     const plane = shooter && shooter.type === 'carrier' ? planes.find(pl => pl.ship === shooter && pl.busyUntil <= launch - 1.0) : null;
-    if (victim && (final || (rnd() < CINE_CHANCE && launch - lastCine > 5))) {
+    if (victim && (final || (rnd() < CINE_CHANCE && launch - lastCine > 1.5))) {
       /* two kinds of close-up: ride behind the shell, or cut to the ship just before it is hit */
       const style = plane ? 'ship' : (cineCount++ % 2 === 0 ? 'shell' : 'ship');
       const camFrom = style === 'shell' ? launch + 0.02 : impact - 0.5, slowFrom = style === 'shell' ? launch + 0.12 : impact - 0.1;
