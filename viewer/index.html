@@ -616,10 +616,30 @@ const sfx = (function () {
     pop(x) { tone({ x, drive: true, f0: 140, f1: 52, sweep: 0.1, dur: 0.28, gain: 0.4 }); noise({ x, type: 'bandpass', q: 0.5, f0: 1600, f1: 500, dur: 0.22, gain: 0.5 }); },
     /* a short rattle of light anti-aircraft guns */
     flak(x) { for (let i = 0; i < 5; i++) noise({ x, at: i * 0.075, type: 'bandpass', q: 0.9, f0: 1700, f1: 1100, dur: 0.05, gain: 0.22 }); },
-    /* ship's horn for the opening shot */
-    horn(x) {
-      for (const f of [87, 131, 175]) tone({ x, wave: 'sawtooth', lp: 520, f0: f, f1: f * 0.985, dur: 2.6, gain: 0.2, attack: 0.25 });
-      noise({ x, type: 'bandpass', q: 0.6, f0: 300, f1: 260, dur: 2.6, gain: 0.08, attack: 0.3 });
+    /* A battle horn, not a beep: a low brass chord that swells in, holds for seconds and rings away across the water.
+       Detuned sawtooth layers give the reedy growl, a filter opening over the attack gives the "braaam", the pitch
+       scoops up into the note, and a long private reverb carries the tail. far = the enemy answering in the distance. */
+    horn(x, far) {
+      const t = when(), f0 = far ? 61.7 : 73.4, dur = far ? 2.8 : 4.4, peak = far ? 0.16 : 0.5, top = far ? 620 : 2100;
+      const mix = ctx.createGain(), lp = ctx.createBiquadFilter(), g = ctx.createGain(); lp.type = 'lowpass'; lp.Q.value = 1.1;
+      lp.frequency.setValueAtTime(220, t); lp.frequency.linearRampToValueAtTime(top, t + 0.75); lp.frequency.setValueAtTime(top, t + dur - 1.3); lp.frequency.linearRampToValueAtTime(260, t + dur);
+      g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + 0.5); g.gain.setValueAtTime(peak, t + dur - 1.4); g.gain.linearRampToValueAtTime(0.0001, t + dur);
+      /* a stacked fifth chord over two octaves: the upper notes are what small speakers actually reproduce */
+      for (const [mult, cents, level, wave] of [[0.5, 0, 0.16, 'sine'], [1, -8, 0.3, 'sawtooth'], [1, 7, 0.3, 'sawtooth'], [1.5, -5, 0.3, 'sawtooth'], [2, 6, 0.5, 'sawtooth'], [2, -9, 0.4, 'sawtooth'], [3, -3, 0.4, 'sawtooth'], [4, 4, 0.3, 'sawtooth']]) {
+        const o = ctx.createOscillator(), og = ctx.createGain(); o.type = wave; o.detune.value = cents; og.gain.value = level;
+        o.frequency.setValueAtTime(f0 * mult * 0.95, t); o.frequency.linearRampToValueAtTime(f0 * mult, t + 0.55); o.frequency.setValueAtTime(f0 * mult, t + dur - 0.9); o.frequency.linearRampToValueAtTime(f0 * mult * 0.985, t + dur);
+        o.connect(og); og.connect(mix); o.start(t); o.stop(t + dur + 0.1);
+      }
+      const air = ctx.createBufferSource(), airF = ctx.createBiquadFilter(), airG = ctx.createGain(); air.buffer = noiseBuf; air.loop = true;       // breath in the horn
+      airF.type = 'bandpass'; airF.frequency.value = f0 * 6; airF.Q.value = 0.7; airG.gain.value = 0.18; air.connect(airF); airF.connect(airG); airG.connect(mix); air.start(t); air.stop(t + dur + 0.1);
+      mix.connect(lp); lp.connect(g); g.connect(out(x));
+      const growl = ctx.createGain(); growl.gain.value = 0.16; g.connect(growl); growl.connect(out(x, true));
+      if (!ctx.__tail) {
+        const n = Math.floor(ctx.sampleRate * 3.6), ir = ctx.createBuffer(2, n, ctx.sampleRate);
+        for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); let v = 0; for (let i = 0; i < n; i++) { v += (Math.random() * 2 - 1 - v) * 0.22; d[i] = v * Math.pow(1 - i / n, 2.2); } }
+        ctx.__tail = ctx.createConvolver(); ctx.__tail.buffer = ir; const tg = ctx.createGain(); tg.gain.value = 0.9; ctx.__tail.connect(tg); tg.connect(bus);
+      }
+      const send = ctx.createGain(); send.gain.value = far ? 0.9 : 0.55; g.connect(send); send.connect(ctx.__tail);
     },
   };
   const api = {
@@ -806,7 +826,7 @@ function build(replay) {
   $('title').innerHTML = `<span class="va"></span><br>vs<br><span class="vb"></span>`;
   $('title').children[0].textContent = R.players.A.name; $('title').children[2].textContent = R.players.B.name;
   $('sub').textContent = 'Two bots. One ocean.'; $('card').classList.toggle('on', OPENER <= 0);
-  if (OPENER > 0) { at(OPENER - 1, () => $('card').classList.add('on')); at(0.9, () => sfx.horn(hero ? hero.x : 0)); }
+  if (OPENER > 0) { at(OPENER - 1, () => $('card').classList.add('on')); at(0.7, () => sfx.horn(hero ? hero.x : 0)); at(5.4, () => sfx.horn(hero ? -hero.x : 0, true)); }
   at(INTRO - 2.6, () => $('card').classList.remove('on'));
   $('count').textContent = ''; $('feed').textContent = '';
 
