@@ -43,13 +43,15 @@ What you see during a match:
   gulls surround the battle area, placed clear of the grids and the lanes the
   fleets sail in on.
 - **Sinkings.** Every sinking sets off a run of explosions down the hull, a
-  rolling smoke column and smoke across the lens. The ship then stays as a
+  smoke column that builds slowly and hangs over the wreck, and smoke across
+  the lens. The ship then stays as a
   burnt-out hull with an oil slick and drifting debris.
 - **Finish.** The winner's aircraft fly past in formation over the battlefield
   as the result comes up.
 - **Gunfire.** One shot at a time: turrets swing onto the target and the shell
   arcs across. When it is a carrier's turn, one of its aircraft dives and drops
-  a bomb instead.
+  a bomb instead, drawing a little anti-aircraft fire from the larger ships.
+  The submarine fires a torpedo that runs along the surface.
 - **Hits.** A hit lights its cell red while the ship is afloat, pops a "HIT" or
   "SUNK" callout, and turns one segment of that ship's bar red in the fleet
   display at the top. The red cells clear when the ship sinks.
