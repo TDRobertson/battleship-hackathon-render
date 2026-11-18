@@ -555,6 +555,15 @@ const sfx = (function () {
     const w = ctx.createGain(); w.gain.value = gain * 0.2; src.connect(w); w.connect(out(x, true));
     src.start(when() + (at || 0)); return true;
   }
+  /* a long reverb used only by the horns, built once per audio context */
+  function tail() {
+    if (!ctx.__tail) {
+      const n = Math.floor(ctx.sampleRate * 3.6), ir = ctx.createBuffer(2, n, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); let v = 0; for (let i = 0; i < n; i++) { v += (Math.random() * 2 - 1 - v) * 0.22; d[i] = v * Math.pow(1 - i / n, 2.2); } }
+      ctx.__tail = ctx.createConvolver(); ctx.__tail.buffer = ir; const tg = ctx.createGain(); tg.gain.value = 0.9; ctx.__tail.connect(tg); tg.connect(bus);
+    }
+    return ctx.__tail;
+  }
   const ready = () => on && ctx && !skipRender;
   const S = {
     /* naval gun: sharp crack, driven low thump, body, then a long rolling tail */
@@ -620,6 +629,13 @@ const sfx = (function () {
        Detuned sawtooth layers give the reedy growl, a filter opening over the attack gives the "braaam", the pitch
        scoops up into the note, and a long private reverb carries the tail. far = the enemy answering in the distance. */
     horn(x, far) {
+      if (far && samples.enemy_horn) {
+        /* the enemy's answer is a recording, heard from far off: pitched down, most of its edge filtered away, quiet, and left ringing in the long reverb */
+        const t0 = when(), src = ctx.createBufferSource(), lp = ctx.createBiquadFilter(), g = ctx.createGain(), send = ctx.createGain();
+        src.buffer = samples.enemy_horn; src.playbackRate.value = 0.84; lp.type = 'lowpass'; lp.frequency.value = 1400; lp.Q.value = 0.5;
+        g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(0.38, t0 + 1.0); send.gain.value = 0.75;
+        src.connect(lp); lp.connect(g); g.connect(out(x)); g.connect(send); send.connect(tail()); src.start(t0); return;
+      }
       const t = when(), f0 = far ? 61.7 : 73.4, dur = far ? 2.8 : 4.4, peak = far ? 0.16 : 0.5, top = far ? 620 : 2100;
       const mix = ctx.createGain(), lp = ctx.createBiquadFilter(), g = ctx.createGain(); lp.type = 'lowpass'; lp.Q.value = 1.1;
       lp.frequency.setValueAtTime(220, t); lp.frequency.linearRampToValueAtTime(top, t + 0.75); lp.frequency.setValueAtTime(top, t + dur - 1.3); lp.frequency.linearRampToValueAtTime(260, t + dur);
@@ -634,12 +650,7 @@ const sfx = (function () {
       airF.type = 'bandpass'; airF.frequency.value = f0 * 6; airF.Q.value = 0.7; airG.gain.value = 0.18; air.connect(airF); airF.connect(airG); airG.connect(mix); air.start(t); air.stop(t + dur + 0.1);
       mix.connect(lp); lp.connect(g); g.connect(out(x));
       const growl = ctx.createGain(); growl.gain.value = 0.16; g.connect(growl); growl.connect(out(x, true));
-      if (!ctx.__tail) {
-        const n = Math.floor(ctx.sampleRate * 3.6), ir = ctx.createBuffer(2, n, ctx.sampleRate);
-        for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); let v = 0; for (let i = 0; i < n; i++) { v += (Math.random() * 2 - 1 - v) * 0.22; d[i] = v * Math.pow(1 - i / n, 2.2); } }
-        ctx.__tail = ctx.createConvolver(); ctx.__tail.buffer = ir; const tg = ctx.createGain(); tg.gain.value = 0.9; ctx.__tail.connect(tg); tg.connect(bus);
-      }
-      const send = ctx.createGain(); send.gain.value = far ? 0.9 : 0.55; g.connect(send); send.connect(ctx.__tail);
+      const send = ctx.createGain(); send.gain.value = far ? 0.9 : 0.55; g.connect(send); send.connect(tail());
     },
   };
   const api = {

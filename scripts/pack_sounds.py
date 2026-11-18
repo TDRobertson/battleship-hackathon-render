@@ -8,10 +8,11 @@ script from the repository root:
 
 Recognised names (any of .ogg .mp3 .wav .m4a .flac):
 
-    gun    a ship firing
-    hit    a shell striking a ship
-    miss   a shell landing in the water
-    sink   a ship being destroyed
+    gun          a ship firing
+    hit          a shell striking a ship
+    miss         a shell landing in the water
+    sink         a ship being destroyed
+    enemy_horn   the far fleet's answering horn in the opening
 
 Any event without a file keeps its synthesised sound. Run with --clear to go
 back to fully synthesised sound. Only use audio you have the right to
@@ -25,11 +26,11 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EVENTS = ("gun", "hit", "miss", "sink")
+EVENTS = ("gun", "hit", "miss", "sink", "enemy_horn")
 MIME = {".ogg": "audio/ogg", ".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4", ".flac": "audio/flac"}
 HEADER = """/* Optional recorded sound effects for the viewer.
    Leave this empty to use the built-in synthesised sounds.
-   To use recordings, put gun / hit / miss / sink audio files in viewer/sounds/
+   To use recordings, put gun / hit / miss / sink / enemy_horn audio files in viewer/sounds/
    and run:  python scripts/pack_sounds.py   (see README). */
 """
 

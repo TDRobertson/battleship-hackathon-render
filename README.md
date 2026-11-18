@@ -34,8 +34,9 @@ synthesised effects.
 What you see during a match:
 
 - **Opening.** A waterline shot looking up at a battleship as it sails into
-  frame, then a long-lens view down the line of advance with the enemy fleet on
-  the horizon, before the camera climbs away to the aerial view.
+  frame and sounds its horn, then a long-lens view down the line of advance
+  with the enemy fleet on the horizon answering with a horn of its own, before
+  the camera climbs away to the aerial view.
 - **Sail-in.** Both fleets arrive in formation and curve onto the positions
   the bots chose, and each carrier launches its aircraft, which circle over
   their own fleet.
@@ -183,13 +184,14 @@ feel:
 
 ### Changing the sound effects
 
-The four main effects (a ship firing, a hit, a miss, a ship being destroyed)
-use recordings from `viewer/sounds/`, embedded in `viewer/sounds.js` so the
-page works when opened from disk. Everything else is synthesised.
+Five effects use recordings from `viewer/sounds/`: a ship firing, a hit, a
+miss, a ship being destroyed, and the far fleet's answering horn in the
+opening. They are embedded in `viewer/sounds.js` so the page works when opened
+from disk. Everything else, including the near fleet's horn, is synthesised.
 
 To swap one:
 
-1. Replace `gun`, `hit`, `miss` or `sink` in `viewer/sounds/` (`.ogg`, `.mp3`,
+1. Replace `gun`, `hit`, `miss`, `sink` or `enemy_horn` in `viewer/sounds/` (`.ogg`, `.mp3`,
    `.wav`, `.m4a` or `.flac`). An effect with no file falls back to a
    synthesised sound.
 2. Run `python scripts/pack_sounds.py`.
@@ -270,9 +272,11 @@ progression over the course of a match, are in
 
 ## Credits
 
-Sound recordings are from the CC0 collection
-["Battle at sea"](https://opengameart.org/content/battle-at-sea) by Thimras on
-OpenGameArt; see [`viewer/sounds/CREDITS.md`](viewer/sounds/CREDITS.md).
+Sound recordings are CC0 works from OpenGameArt: the
+["Battle at sea"](https://opengameart.org/content/battle-at-sea) collection by
+Thimras, and
+["Their Coming (generic horn sound)"](https://opengameart.org/content/their-coming-generic-horn-sound)
+by StumpyStrust. See [`viewer/sounds/CREDITS.md`](viewer/sounds/CREDITS.md).
 
 Built on the [Battleship AI Hackathon Kit](https://github.com/mjessey/battleship-hackathon)
 by Maximus Jessey, which provides the game engine, bot SDK and tournament
