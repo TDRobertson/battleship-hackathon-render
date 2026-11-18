@@ -42,8 +42,11 @@ What you see during a match:
 - **Setting.** Islands, a lighthouse, rocks, hazy mountains, sunset clouds and
   gulls surround the battle area, placed clear of the grids and the lanes the
   fleets sail in on.
-- **Wrecks.** Sunk ships stay as burnt-out hulls with smoke, an oil slick and
-  drifting debris.
+- **Sinkings.** Every sinking sets off a run of explosions down the hull, a
+  rolling smoke column and smoke across the lens. The ship then stays as a
+  burnt-out hull with an oil slick and drifting debris.
+- **Finish.** The winner's aircraft fly past in formation over the battlefield
+  as the result comes up.
 - **Gunfire.** One shot at a time: turrets swing onto the target and the shell
   arcs across. When it is a carrier's turn, one of its aircraft dives and drops
   a bomb instead.
