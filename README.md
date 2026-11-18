@@ -52,6 +52,8 @@ What you see during a match:
   arcs across. When it is a carrier's turn, one of its aircraft dives and drops
   a bomb instead, drawing a little anti-aircraft fire from the larger ships.
   The submarine fires a torpedo that runs along the surface.
+- **Damage.** Fires grow with each further hit and spread along the deck, and a
+  ship at half strength or worse has an occasional secondary explosion.
 - **Hits.** A hit lights its cell red while the ship is afloat, pops a "HIT" or
   "SUNK" callout, and turns one segment of that ship's bar red in the fleet
   display at the top. The red cells clear when the ship sinks.
@@ -241,6 +243,7 @@ examples/                 # Hackathon kit: example bots and snippets
 tests/                    # Hackathon kit: test suite
 docs/
 |-- images/               # Screenshots used in this README
+|-- future_ideas.md       # Ideas for the viewer that are not built yet
 |-- hackathon_kit.md      # Original kit README: installing, running, writing bots
 |-- rules.md              # Game rules
 `-- ...                   # Remaining kit documentation
@@ -258,6 +261,12 @@ exporter only listens to the spectator hooks the match runner already provides.
 - The AI view in the demo is estimated, because the reference bot does not
   expose its own scores.
 - The viewer is display-only; there is no interactive play.
+
+## Future ideas
+
+Ideas that have been discussed but not built, including a dusk-to-night
+progression over the course of a match, are in
+[`docs/future_ideas.md`](docs/future_ideas.md).
 
 ## Credits
 

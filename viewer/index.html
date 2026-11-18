@@ -612,6 +612,8 @@ const sfx = (function () {
       tone({ x, drive: true, f0: 95, f1: 48, sweep: 0.15, dur: 0.3, gain: 0.4 });
       noise({ x, type: 'bandpass', q: 0.7, f0: 1100, f1: 320, dur: 0.8, gain: 0.3, attack: 0.05 });
     },
+    /* a small secondary explosion aboard a burning ship */
+    pop(x) { tone({ x, drive: true, f0: 140, f1: 52, sweep: 0.1, dur: 0.28, gain: 0.4 }); noise({ x, type: 'bandpass', q: 0.5, f0: 1600, f1: 500, dur: 0.22, gain: 0.5 }); },
     /* a short rattle of light anti-aircraft guns */
     flak(x) { for (let i = 0; i < 5; i++) noise({ x, at: i * 0.075, type: 'bandpass', q: 0.9, f0: 1700, f1: 1100, dur: 0.05, gain: 0.22 }); },
     /* ship's horn for the opening shot */
@@ -785,7 +787,7 @@ function build(replay) {
     list.forEach((sp, i) => {
       const type = shipType(sp.length, i, lengths), mesh = finish(buildShip(type, sp.length, P), mats(P)), pa = plan[i], start = approachAt(pa, 0);
       const ship = { slot: sp.slot, type, mesh, turrets: mesh.userData.turrets, shotsFired: 0, x: start[0], z: start[1], rot: start[2], speed: 0.6, sunk: false, sinking: 0,
-        moving: true, team: P, length: sp.length, dir, fx: pa.fx, fz: pa.fz, endRot: pa.endRot, x0: pa.x0, hits: 0, marks: [], lean: (i % 2 ? 1 : -1) };
+        moving: true, team: P, length: sp.length, dir, fx: pa.fx, fz: pa.fz, endRot: pa.endRot, x0: pa.x0, hits: 0, marks: [], burn: [], popIn: -99, lean: (i % 2 ? 1 : -1) };
       mesh.position.set(ship.x, 0, ship.z); mesh.rotation.y = ship.rot; world.add(mesh);
       addTween(0, pa.delay + pa.dur, k => { const q = approachAt(pa, k * (pa.delay + pa.dur)); ship.x = q[0]; ship.z = q[1]; ship.rot = q[2]; ship.speed = 1 - Math.max(0, (k * (pa.delay + pa.dur) - pa.delay) / pa.dur); },
         () => { ship.moving = false; ship.x = pa.fx; ship.z = pa.fz; ship.rot = pa.endRot; });
@@ -920,7 +922,8 @@ function land(to, shooterTeam, target, s, i, victim) {
   if (s.outcome === 'miss') { splash(to.x, to.z); sfx.splash(to.x); $('feed').textContent = `${who} · ${cell} · miss`; $('feed').style.color = ''; }
   else {
     explode(to.x, to.z, false); sfx.hit(to.x); const struck = cellShip[target][s.row + ',' + s.col]; if (struck) { struck.hits++; const seg = struck.pip.children[struck.hits - 1]; if (seg) seg.classList.add('hit'); }
-    scorch(struck, to); const mark = hitMark(to, !!victim); if (mark && struck) struck.marks.push(mark); emitters.push({ x: to.x, z: to.z, team: target, row: s.row, col: s.col, acc: 0, on: true });
+    scorch(struck, to); const mark = hitMark(to, !!victim); if (mark && struck) struck.marks.push(mark); emitters.push({ x: to.x, z: to.z, team: target, row: s.row, col: s.col, acc: 0, on: true, ship: struck });
+    if (struck) struck.burn.push(Math.cos(struck.rot) * (to.x - struck.x) - Math.sin(struck.rot) * (to.z - struck.z));
     $('feed').textContent = `${who} · ${cell} · HIT`; $('feed').style.color = '#ffd27a';
     if (victim) sink(victim, s.sunk.cells, target, who);
   }
@@ -1048,7 +1051,7 @@ function explode(x, z, big, quiet, scale) {
   const n = big ? 34 : 16, v = (big ? 5.5 : 3.2) * (scale || 1), sz = scale || 1;
   for (let k = 0; k < n; k++) spawn(glow, { x, y: 0.5, z, vx: rr(-v, v) * 0.6, vy: rr(1, v), vz: rr(-v, v) * 0.6, g: -5, life: rr(0.3, big ? 0.9 : 0.6) * (sz > 1 ? 1.25 : 1), s0: (big ? 1.3 : 0.8) * sz, s1: 0.2, color: rnd() < 0.5 ? 0xffa030 : 0xff5a1e });
   for (let k = 0; k < (big ? 14 : 6); k++) spawn(puff, { x: x + rr(-0.3, 0.3), y: 0.6, z: z + rr(-0.3, 0.3), vx: rr(-0.8, 0.8), vy: rr(1, 2.6), vz: rr(-0.8, 0.8), life: rr(1.2, 2.4), s0: 0.6, s1: big ? 3 : 1.9, a: 0.55, color: 0x2a2623 });
-  flash.position.set(x, 2, z); flash.intensity = big ? 5 : 2.6; shake = Math.max(shake, big ? 0.45 : 0.12);
+  flash.position.set(x, 2, z); flash.intensity = (big ? 5 : 2.6) * Math.min(1, sz); shake = Math.max(shake, (big ? 0.45 : 0.12) * Math.min(1, sz));
   /* shock ring racing out across the water, and sparks thrown high */
   if (!quiet) {
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.94, 1, 32), new THREE.MeshBasicMaterial({ color: 0xffe2b8, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.DoubleSide }));
@@ -1069,13 +1072,13 @@ function sink(ship, cells, team, who) {
     at(clock + i * 0.2, () => {
       explode(x, z, true, i % 2 === 1, 1.9);
       for (let k = 0; k < 7; k++) spawn(puff, { x, y: 0.5, z, vx: rr(-3, 3), vy: rr(3.5, 7.5), vz: rr(-3, 3), g: -10, life: rr(0.9, 1.5), s0: rr(0.1, 0.2), s1: 0.08, a: 1, color: 0x15110f });      // debris
-      for (let k = 0; k < 2; k++) spawn(puff, { x: x + rr(-0.4, 0.4), y: 0.8, z: z + rr(-0.4, 0.4), vx: rr(0.1, 0.4), vy: rr(0.9, 1.5), vz: rr(-0.2, 0.2), life: rr(3.5, 5), s0: 0.9, s1: rr(3.6, 4.8), a: 0.6, color: 0x1b1816 });   // first smoke
+      for (let k = 0; k < 2; k++) spawn(puff, { x: x + rr(-0.4, 0.4), y: 0.8, z: z + rr(-0.4, 0.4), vx: rr(0.1, 0.4), vy: rr(0.9, 1.5), vz: rr(-0.2, 0.2), life: rr(3.5, 5), s0: 0.8, s1: rr(2.9, 3.9), a: 0.6, color: 0x1b1816 });   // first smoke
     });
     sfx.boom(x, i * 0.2);
   }
   /* then the column itself: it builds slowly, towers, and hangs there, fed for several seconds as the ship goes under */
   billows.push({ x0: a.x, z0: a.z, x1: b.x, z1: b.z, since: clock, acc: 0 });
-  addTween(clock + 0.3, 4.2, k => { $('veil').style.opacity = (0.84 * Math.pow(Math.sin(Math.PI * Math.pow(k, 0.7)), 0.9)).toFixed(3); $('veil').style.transform = `translate(${(k * 9 - 4).toFixed(2)}%, ${(2 - k * 5).toFixed(2)}%) scale(${(1.05 + k * 0.2).toFixed(3)})`; },
+  addTween(clock + 0.3, 3.7, k => { $('veil').style.opacity = (0.6 * Math.pow(Math.sin(Math.PI * Math.pow(k, 0.7)), 0.9)).toFixed(3); $('veil').style.transform = `translate(${(k * 9 - 4).toFixed(2)}%, ${(2 - k * 5).toFixed(2)}%) scale(${(1.05 + k * 0.2).toFixed(3)})`; },
     () => { $('veil').style.opacity = 0; });
   sfx.sink(ship.x);
   events.sort((a, b) => a.t - b.t);
@@ -1185,9 +1188,10 @@ function step(dt) {
     for (const e of emitters) {
       if (!e.on) continue; e.acc += sdt;
       while (e.acc > 0.11) { e.acc -= 0.11;
-        spawn(glow, { x: e.x + rr(-0.15, 0.15), y: 0.45, z: e.z + rr(-0.15, 0.15), vy: rr(0.8, 1.7), life: rr(0.35, 0.6), s0: 0.55, s1: 0.12, color: rnd() < 0.5 ? 0xff8a20 : 0xffc040 });
+        const worse = e.ship ? Math.min(2, 1 + 0.3 * (e.ship.hits - 1)) : 1;      // each further hit makes every fire on that ship bigger
+        spawn(glow, { x: e.x + rr(-0.15, 0.15), y: 0.45, z: e.z + rr(-0.15, 0.15), vy: rr(0.8, 1.7) * worse, life: rr(0.35, 0.6), s0: 0.55 * worse, s1: 0.12, color: rnd() < 0.5 ? 0xff8a20 : 0xffc040 });
         if (rnd() < 0.15) spawn(glow, { x: e.x, y: 0.6, z: e.z, vx: rr(0.2, 1), vy: rr(1.5, 3), vz: rr(-0.4, 0.4), life: rr(0.8, 1.5), s0: 0.09, s1: 0.03, color: 0xffb040 });
-        if (rnd() < 0.4) spawn(puff, { x: e.x, y: 0.8, z: e.z, vx: rr(0.2, 0.6), vy: rr(0.9, 1.5), vz: rr(-0.2, 0.2), life: rr(1.2, 2), s0: 0.35, s1: 1.4, a: 0.4, color: 0x2a2623 });
+        if (rnd() < 0.4) spawn(puff, { x: e.x, y: 0.8, z: e.z, vx: rr(0.2, 0.6), vy: rr(0.9, 1.5), vz: rr(-0.2, 0.2), life: rr(1.2, 2) * (0.7 + 0.3 * worse), s0: 0.35, s1: 1.4 * (0.6 + 0.4 * worse), a: 0.4, color: 0x2a2623 });
       }
     }
     for (const P of ['A', 'B']) for (const s of ships[P]) {
@@ -1195,6 +1199,18 @@ function step(dt) {
       s.mesh.position.set(s.x, bob * (1 - 0.6 * k) - (s.type === 'submarine' ? 0.05 : 0) - k * k * 0.36, s.z);
       s.mesh.rotation.set((s.roll || 0) + list + Math.sin(wall * 1.3 + s.x) * 0.03 * (1 - k), s.rot, (s.pitch || 0) + Math.sin(wall * 1.1 + s.z) * 0.02 * (1 - k));
       if (s.sunk) continue;
+      if (s.hits >= 2) {
+        /* damage builds: fire spreads along the deck between the hits, and a ship at half strength or worse cooks off now and then */
+        const lo = Math.max(-s.length / 2 + 0.3, Math.min(...s.burn) - 0.5), hi = Math.min(s.length / 2 - 0.3, Math.max(...s.burn) + 0.5), c = Math.cos(s.rot), sn = Math.sin(s.rot);
+        for (let n = emit(3 * s.hits, sdt); n > 0; n--) { const lx = rr(lo, hi); spawn(glow, { x: s.x + c * lx + rr(-0.1, 0.1), y: 0.5, z: s.z - sn * lx + rr(-0.1, 0.1), vy: rr(0.7, 1.4), life: rr(0.3, 0.5), s0: 0.4, s1: 0.1, color: rnd() < 0.5 ? 0xff8a20 : 0xffc040 }); }
+        if (s.hits / s.length >= 0.5) {
+          s.popIn -= sdt;
+          if (s.popIn <= 0) {
+            if (s.popIn > -50) { const lx = rr(lo, hi), x = s.x + c * lx, z = s.z - sn * lx; explode(x, z, false, true, 0.75); sfx.pop(x); }
+            s.popIn = rr(2.6, 5);
+          }
+        } else s.popIn = -99;                                                       // not yet: arm the timer without firing when it first qualifies
+      }
       for (const r of s.mesh.userData.spin) r.rotation.y += sdt * 2.2;
       for (const st of s.mesh.userData.stacks) if (rnd() < sdt * 5) {
         const c = Math.cos(s.rot), sn = Math.sin(s.rot), lz = st[2] || 0;
@@ -1214,7 +1230,7 @@ function step(dt) {
       bw.acc += sdt * (age < 5 ? 1 : 1 - (age - 5) / 4);                 // full flow for five seconds, then tapering off
       while (bw.acc > 0.2) { bw.acc -= 0.2;
         const f = rnd(), x = bw.x0 + (bw.x1 - bw.x0) * f + rr(-0.3, 0.3), z = bw.z0 + (bw.z1 - bw.z0) * f + rr(-0.3, 0.3);
-        spawn(puff, { x, y: 0.7, z, vx: rr(0.12, 0.34), vy: rr(0.55, 0.95), vz: rr(-0.1, 0.1), life: rr(6.5, 9), s0: 0.8, s1: rr(5, 7.5), a: 0.68, color: rnd() < 0.3 ? 0x2a2522 : 0x161312 });
+        spawn(puff, { x, y: 0.7, z, vx: rr(0.12, 0.34), vy: rr(0.55, 0.95), vz: rr(-0.1, 0.1), life: rr(6.5, 9), s0: 0.7, s1: rr(3.7, 5.4), a: 0.68, color: rnd() < 0.3 ? 0x2a2522 : 0x161312 });
       }
     }
     for (const w of wrecks) {
@@ -1275,6 +1291,7 @@ $('file').addEventListener('change', e => {
 window.__frame = () => { skipRender = false; step(1 / 30); return [clock, wall]; };
 window.__dbg = () => ({ torpedo: !!(lastShell && lastShell.mesh.parent && lastShell.mesh.geometry.type === 'CylinderGeometry'), dive: planes.some(pl => pl.segs.some(sg => clock >= sg.t0 && clock < sg.t1 && sg.t0 > INTRO + 2 && sg.p1[1] < 2)) });
 window.__tracers = () => glow.items.filter(q => q.life > 0 && q.s.material.color.getHex() === 0xffe9a0).length;
+window.__hurt = () => { let best = null; for (const P of ['A', 'B']) for (const v of ships[P]) if (!v.sunk && v.hits >= 2 && (!best || v.hits / v.length > best.hits / best.length)) best = v; return best ? [best.type, best.hits, best.length, best.x, best.z, best.popIn] : null; };
 window.__clock = () => clock; window.__wall = () => wall; window.__cam = () => [camera.position.x, camera.position.y, camera.position.z];
 window.__alive = () => glow.items.filter(q => q.life > 0).length + puff.items.filter(q => q.life > 0).length;
 window.__stepQuiet = dt => { skipRender = true; step(dt); placeCamera(wall); skipRender = false; }; window.__ships = () => ships.A.concat(ships.B).map(v => [v.team, v.type, v.x, v.z, v.rot]); window.__sfx = sfx;
