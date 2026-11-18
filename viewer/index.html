@@ -617,14 +617,20 @@ const sfx = (function () {
     /* f: 0 = aerial view, 1 = close-up; s: current time scale (slow motion lowers pitch) */
     view(f, s) { focus = f; slow = 0.6 + 0.4 * s; if (ctx && ctx.state === 'running') damp.frequency.setTargetAtTime(2400 + 9000 * f * f, ctx.currentTime, 0.08); },
     /* test hook: render each effect offline and return the samples */
-    async render(seq, seconds) {
+    async render(seq, seconds, bed) {
       seq = seq || [['gun', 0], ['hit', 5], ['boom', 10], ['splash', 15]]; seconds = seconds || 20;
-      const sr = 44100, off = new OfflineAudioContext(1, sr * seconds, sr), keep = ctx;
-      graph(off); master.gain.value = 0.85; for (const [n, t] of seq) { base = t; S[n](0); } base = 0;
+      const sr = 44100, off = new OfflineAudioContext(1, sr * seconds, sr), keep = ctx, keepSlow = slow, keepFocus = focus;
+      graph(off); master.gain.value = 0.85; if (bed) ambience();
+      for (const e of seq) { if (Array.isArray(e)) { base = e[1]; S[e[0]](0); } else { base = e.t; slow = e.slow; focus = e.focus; S[e.n].apply(null, e.a); } }
+      base = 0; slow = keepSlow; focus = keepFocus;
       const buf = await off.startRendering(); ctx = keep; return Array.from(buf.getChannelData(0));
     },
   };
-  for (const name of Object.keys(S)) api[name] = function () { if (ready()) S[name].apply(null, arguments); };
+  /* every effect can be logged (window.__sfxLog) so a filmed run can have its soundtrack rendered offline afterwards */
+  for (const name of Object.keys(S)) api[name] = function () {
+    if (window.__sfxLog) window.__sfxLog.push({ n: name, t: wall, a: Array.from(arguments), slow, focus });
+    if (ready()) S[name].apply(null, arguments);
+  };
   return api;
 })();
 
@@ -749,7 +755,7 @@ function setAiView(on) {
 function build(replay) {
   R = replay; rows = R.rules.rows; cols = R.rules.cols; seed = (R.seed || 1) * 7919 + 13;
   while (world.children.length) world.remove(world.children[0]);
-  clearPools(); events = []; evIndex = 0; tweens = []; emitters = []; clock = 0; shake = 0; flash.intensity = 0; cine = null; cineShip = null; lastShell = null; chase.set = false; planes = []; wrecks = []; debris = [];
+  clearPools(); events = []; evIndex = 0; tweens = []; emitters = []; clock = 0; shake = 0; flash.intensity = 0; cine = null; cineShip = null; lastShell = null; chase.set = false; planes = []; wrecks = []; debris = []; callouts.length = 0;
   ships = { A: [], B: [] }; cellShip = { A: {}, B: {} };
   hasHeat = R.shots.some(sh => sh.heat);
   const src = R.heat_source || {}, own = ['A', 'B'].filter(P => src[P] === 'bot');
@@ -935,7 +941,7 @@ function stepPlanes() {
   }
 }
 /* a hit has to read from the aerial view: a red cell that stays lit, a pulse, and a callout */
-let HITGEO = null;
+let HITGEO = null; const callouts = [];
 function hitMark(to, sunk) {
   HITGEO = HITGEO || new THREE.PlaneGeometry(0.94, 0.94);
   let cell = null;
@@ -948,9 +954,11 @@ function hitMark(to, sunk) {
   g.font = '700 64px "Chakra Petch", "Segoe UI", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
   g.lineWidth = 10; g.strokeStyle = 'rgba(10,6,4,.85)'; g.strokeText(sunk ? 'SUNK' : 'HIT', 128, 50); g.fillStyle = sunk ? '#ff5a3c' : '#ffd24a'; g.fillText(sunk ? 'SUNK' : 'HIT', 128, 50);
   const tex = new THREE.CanvasTexture(cv), tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false, fog: false }));
-  const size = sunk ? 3.4 : 2.4; tag.scale.set(size, size * 0.375, 1); tag.position.set(to.x, 1.6, to.z); tag.renderOrder = 5; world.add(tag);
-  addTween(clock, sunk ? 1.6 : 1.1, k => { tag.position.y = 1.6 + 1.3 * ease(k); tag.material.opacity = k < 0.7 ? 1 : (1 - k) / 0.3; const p = 1 + 0.35 * Math.max(0, 1 - k * 6); tag.scale.set(size * p, size * 0.375 * p, 1); },
-    () => { world.remove(tag); tex.dispose(); tag.material.dispose(); });
+  /* sized by distance to the camera, so the callout reads the same from the aerial view and in a close-up */
+  const size = sunk ? 0.15 : 0.1; tag.scale.set(0.001, 0.001, 1); tag.position.set(to.x, 1.6, to.z); tag.renderOrder = 5; world.add(tag);
+  addTween(clock, sunk ? 1.6 : 1.1, k => { tag.position.y = 1.6 + 1.3 * ease(k); tag.material.opacity = k < 0.7 ? 1 : (1 - k) / 0.3; tag.userData.size = size * (1 + 0.35 * Math.max(0, 1 - k * 6)); },
+    () => { world.remove(tag); callouts.splice(callouts.indexOf(tag), 1); tex.dispose(); tag.material.dispose(); });
+  tag.userData.size = size; callouts.push(tag);
   return cell;
 }
 function scorch(ship, to) {
@@ -1048,7 +1056,11 @@ function placeCamera(t) {
         const sp = ls.mesh.position;
         chase.pos.set(sp.x - ls.dx * 3.0 - ls.dz * 0.6, Math.max(0.8, sp.y + 1.0), sp.z - ls.dz * 3.0 + ls.dx * 0.6);
         chase.look.set(sp.x * 0.7 + sh.x * 0.3, sp.y * 0.7 + 0.1, sp.z * 0.7 + sh.z * 0.3); chase.set = true;
-      } else if (chase.set) { chase.look.x += (sh.x - chase.look.x) * 0.12; chase.look.y += (0.35 - chase.look.y) * 0.12; chase.look.z += (sh.z - chase.look.z) * 0.12; }
+      } else if (chase.set) {
+        /* the shell has landed: keep looking at the ship but back off and climb, so the blast does not swallow the camera */
+        chase.look.x += (sh.x - chase.look.x) * 0.12; chase.look.y += (0.35 - chase.look.y) * 0.12; chase.look.z += (sh.z - chase.look.z) * 0.12;
+        if (ls) { const bx = sh.x - ls.dx * 7.5 - ls.dz * 1.5, bz = sh.z - ls.dz * 7.5 + ls.dx * 1.5; chase.pos.x += (bx - chase.pos.x) * 0.07; chase.pos.y += (3.6 - chase.pos.y) * 0.07; chase.pos.z += (bz - chase.pos.z) * 0.07; }
+      }
       if (chase.set) { cx = chase.pos.x; cy = chase.pos.y; cz = chase.pos.z; lx = chase.look.x; ly = chase.look.y; lz = chase.look.z; }
     }
     if (cx === undefined) {
@@ -1124,7 +1136,11 @@ function step(dt) {
     flash.intensity *= Math.pow(0.002, sdt); shake *= Math.pow(0.01, sdt);
     if (loop && clock > endAt + 7) build(R);
   }
-  if (!skipRender) { placeCamera(wall); renderer.render(scene, camera); }
+  if (!skipRender) {
+    placeCamera(wall);
+    for (const tag of callouts) { const d = tag.userData.size * camera.position.distanceTo(tag.position); tag.scale.set(d, d * 0.375, 1); }
+    renderer.render(scene, camera);
+  }
 }
 function frame(now) { const dt = Math.min(0.05, (now - last) / 1000); last = now; step(dt); requestAnimationFrame(frame); }
 
@@ -1158,6 +1174,7 @@ $('file').addEventListener('change', e => {
 });
 
 /* test hook: advance the replay by a fixed number of seconds */
+window.__frame = () => { skipRender = false; step(1 / 30); return [clock, wall]; };
 window.__clock = () => clock; window.__ships = () => ships.A.concat(ships.B).map(v => [v.team, v.type, v.x, v.z, v.rot]); window.__sfx = sfx;
 window.__advance = (secs, draw) => { if ($('start').classList.contains('on')) { $('start').classList.remove('on'); paused = false; } skipRender = !draw; for (let i = 0, n = Math.round(secs * 30); i < n; i++) step(1 / 30); skipRender = false; if (draw !== null) step(0); };
 
