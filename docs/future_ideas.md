@@ -36,6 +36,9 @@ time, and whether the opening shots should stay at sunset regardless.
 
 ## Other ideas
 
+- **A close-up on every sinking.** Currently a share of sinkings get the
+  slow-motion close-up. Setting `CINE_CHANCE` to `1` and `CINE_GAP` to about
+  `1.5` gives one to every ship; it was tried and adds roughly two seconds each.
 - **Highlights mode.** A button that plays a condensed cut: the opening, a few
   close-ups and the finish.
 - **Video export script.** Render a match frame by frame to an MP4 at an exact

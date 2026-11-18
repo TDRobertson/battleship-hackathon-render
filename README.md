@@ -61,7 +61,7 @@ What you see during a match:
 - **AI view.** Each grid glows with where the attacking bot expects ships to be,
   updated every time it fires, and the cell it picks is marked. Toggle it with
   **V**.
-- **Close-ups.** Every sinking gets a short slow-motion close-up, either riding
+- **Close-ups.** Some sinkings get a short slow-motion close-up, either riding
   behind the shell on its way in or cutting to the ship just before it is hit.
 
 ## Quick start
@@ -176,10 +176,11 @@ feel:
 
 | Constant | Default | Effect |
 | --- | --- | --- |
-| `PACE` | `0.85` | Overall speed of everything: opening, ships, shells, effects. `1` is the original pace. |
+| `PACE` | `0.85` | Speed of the battle: shells, torpedoes, bombs, explosions and smoke. `1` is the original pace. The opening and sail-in always run at full speed, and aircraft keep their full flying speed. |
 | `TARGET_BATTLE` | `70` | Target length of the battle in seconds; shot pacing is scaled to fit, within limits that keep roughly one shell in the air at a time. |
 | `OPENER` | `8.0` | Length of the cinematic opening in seconds. `0` skips straight to the aerial view. |
-| `CINE_CHANCE` | `1` | Chance that a sinking gets a slow-motion close-up. `1` means every ship that goes down. |
+| `CINE_CHANCE` | `0.45` | Chance that a sinking gets a slow-motion close-up. The last one always does; `1` means every ship that goes down. |
+| `CINE_GAP` | `5` | Minimum match seconds between close-ups. Lower it to about `1.5` if `CINE_CHANCE` is `1`. |
 | `CINE_SLOW` | `0.38` | Time scale during a close-up. |
 | `PLANES` | `3` | Aircraft each carrier launches. |
 
